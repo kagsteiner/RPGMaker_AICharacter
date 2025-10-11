@@ -156,7 +156,7 @@
  * - wait: ms (50-1000)
  * 
  * TERMS
- * MIT License.
+ * MIT License. Note that the plugin is completely LLM generated and doesn't reflect my own coding skills :-).
  */
 
 (() => {
@@ -972,5 +972,6 @@
         });
     }
 })();
+
 
 

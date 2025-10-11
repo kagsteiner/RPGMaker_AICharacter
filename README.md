@@ -19,12 +19,71 @@ Use the plugin in an RPGMaker MZ event to
 - Let an NPC give the player an item (if the LLM decides it wants to).
 - NPCs that want to go to a certain coordinate automatically do thiw by finding the shortest path there.
 - Decide what LLM you want to use, how dialogs should look like and how they should be positioned.
+- The commands tell the LLM the location of Player and all Events including its own.
+- The commands tell the LLM the complete interaction history.
 
 ## Commands
-- TBD
+ChatMenu has no command, it will create a "Chat" menu or a "Chat" button.
+
+Commands of AICharacter:
+
+### Set NPC Description
+- description: any text. Use it to tell the LLM name and features of this NPC, background story etc. Ensure that you use the same article for description and other commands (ie. always "you" or "she").
+
+### Decide And Act
+Based on what is written in the description, allow the NPC to choose any action. Possible actions the NPC can select are:
+- Move (coordinate) tries to move to reach the coordinate. The plugin will take the first step on the shortest path to this coordinate.
+- Speak speaks the text the LLM wants to speak.
+- Give: gives an item to the Player. To do this properly, the description should mention the item exactly as called in RPGMaker's item list, including the id/index.
+- Set Switch: changes the switch of an item. Typically used with "Decide Toward Goal".
+- Wait: If the LLM doesn't know what to do, it can always wait between 500 ms and a second. 
+
+### Decide Toward Goal
+You specify a goal and the LLM tries to reach it.
+- Goal: describe PRECISLEY what goal to reach. Also describe how the LLM can judge whether it has reached the goal and whether it has surely failed reaching the goal. This is a key prompt. Small changes can make a large difference in LLM behavior.
+- Result variable: when the LLM has finished this command, it will fill this variable with one of these values: 1 (LLM believes it has reached the goal), -1 (LLM believes it will be unable to reach the goal anymore), 0 (LLM wants to continue pursuing this goal). NOTE there is currently a bug that if the variable is 1 or -1 before calling the command, the command will not work. Either use different variables or initialize the variable to 0 before calling the command.
+- Switch Policy: describe which game switches the LLM should have available to manipulate, what they do, mwybe why it wants to use them to reach the goal.
+- Allowed Switch Ids: Comma-separated list of switches the LLM can switch. Note that I have never tried this out, but it might have potential.
 
 ## Usage
 Put the two plugins AICharacter and ChatMenu into the js/plugins folder of your game. Then go to the plugin manager to define the following plugin parameters:
+
+I suggest you use Mistral which is faster than OpenAI and okay-ish in terms of reliability.
+
+### AICharacter
+- LLM API Key: Go to Mistral.ai or OpenAI.com and get an API Key for your LLM. This will involve costs - playing with an LLM calls the LLM, which is not free.
+(I'm working on a version to integrate a local LLM)
+- Provider: either mistral or openai
+- Mistral API Base URL, OpenAI API Base URL: don't change (if you want to connect to a different LLM with the same API, like DeepSeek, changing this should work)
+- Proxy URL: honestly, I don't know why ChatGPT found this important to generate. Leave empty.
+- Temperature: 0.20 - the lower the more predictable - Mistral only, the new GPT5 models don't support temperatures
+- Max Tokens: how many tokens max the LLM should generate. Also Mistral only.
+- Enable reply choice: when the NPC talks to you, do you immediately want a Reply / Continue option?
+- Reply Choice label: The text of the button to reply.
+- NPC Message background: inherit, window, dim, transparant - like the setting for normal dialogs.
+- NPC Message position: inherit, top, middle, bottom - like the setting for normal dialogs.
+
+### ChatMenu
+- Enable Quick Chat Bar: enable and you get a chat bar (center bottom position) with a "chat" button so you can easily always start a chat.
+- Quick bar label: the text of the button to chat.
+
+## Example Event
+My most successful experiments go like this:
+1. create a new event, select parallel as trigger.
+2. First event command is "Set NPC Description". Write a really nice description. The livelier the description, with background of the character in the story, description of how (s)he looks etc, the more the LLM has to chat about and act natural.
+3. Add a loop.
+4. Within the loop, do this:
+   1. call "Decide Toward Goal". Select an unused variable to store the result of the command. Write a really crisp description of the goal to reach, and success/failure criteria the LLM will understand.
+   2. create an if-then-else statement that does things depending on the outcome. I typically create a second tab with condition "switch x is set", and set the switch when "Decide Toward Goal" returns 1 or -1. Also break the loop in these cases.
+   3. Add a short wait statement, e.g. 500 msec to 2 sec. Without this wait, the parallel event will eat all time and the UI will hang.
+
+## known issues
+- If a variable is non-zero when calling "Decide Towards Goal" the command can fail.
+- Sometimes the LLM is annoyingly chatty, and you get a new dialog every few seconds.
+- Player actions that are not chatting with the LLM are not added to the knowledge of the LLM yet.
+- 
+
+  
 
 
 

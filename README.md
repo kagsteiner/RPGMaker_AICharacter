@@ -4,7 +4,7 @@ A plugin for RPGMaker MZ for characters controlled by LLMs
 ## Purpose
 NPCs for the RPGs you define wiht RPGMaker are clumsy to write and hard to write in a way that feels like an actual "non player character" (this holds true for most RPGs, actually).
 
-This plugin allows you to connect an LLM from Mistral or from OpenAI to an RPGMaker event, turning it into a character you can talk to, and to have much more lively interactions with. It's a bit experimental. It works, is fairly bug-free, but I have no clue if it is realiable enough for a real productiv RPG.
+This plugin allows you to connect an LLM from Mistral, from OpenAI or from a local LMStudio LLM to an RPGMaker event, turning it into a character you can talk to, and to have much more lively interactions with. It's a bit experimental. It works, is fairly bug-free, but I have no clue if it is realiable enough for a real productiv RPG.
 
 Try it out and decide for yourself.
 

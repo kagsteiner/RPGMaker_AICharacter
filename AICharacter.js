@@ -1,6 +1,6 @@
 /*:
  * @target MZ
- * @plugindesc v1.1 NPC AI via Mistral or GPT-5 (mini/nano). Set NPC description; decide and act. 
+ * @plugindesc v1.1 NPC AI via Mistral, OpenAI, or LM Studio (local). Set NPC description; decide and act. 
  * @author You
  * 
  * @param ApiKey
@@ -12,12 +12,12 @@
  * @param Model
  * @text Model
  * @type string
- * @default mistral-large-latest
+ * @default gemma-3-12b-it
  * 
  * @param Provider
  * @text Provider
  * @type string
- * @desc Provider to use: 'mistral' or 'openai' (for gpt-5-mini/nano)
+ * @desc Provider to use: 'mistral', 'openai' (gpt-5-mini/nano), or 'lmstudio'
  * @default mistral
  * 
  * @param ApiBaseUrl
@@ -29,6 +29,11 @@
  * @text OpenAI API Base URL
  * @type string
  * @default https://api.openai.com/v1/chat/completions
+ * 
+ * @param LMStudioBaseUrl
+ * @text LM Studio API Base URL
+ * @type string
+ * @default http://localhost:1234/v1/chat/completions
  * 
  * @param ProxyUrl
  * @text Proxy URL (optional)
@@ -126,14 +131,21 @@
  * @default 
  * 
  * @help AICharacter.js
- * This plugin lets an NPC (event) decide its next action using Mistral Large.
+ * This plugin lets an NPC (event) decide its next action using Mistral, OpenAI, or LM Studio (local).
  * 
  * USAGE
  * 1) Enable the plugin.
- * 2) Create an NPC event. Set a page to Parallel.
- * 3) On that page, call Plugin Command → AICharacter → Set NPC Description once.
+ * 2) Choose Provider:
+ *    - "lmstudio" for local models via LM Studio (default; no API key required).
+ *      Make sure LM Studio is running with the OpenAI-compatible server enabled.
+ *      Default base URL: http://localhost:1234/v1/chat/completions
+ *      Default model: gemma-3-12b-it
+ *    - "mistral" for Mistral API (requires ApiKey).
+ *    - "openai" for GPT-5 mini/nano (requires ApiKey).
+ * 3) Create an NPC event. Set a page to Parallel.
+ * 4) On that page, call Plugin Command → AICharacter → Set NPC Description once.
  *    Put your NPC background/character/situation in the description box.
- * 4) Then repeatedly call Plugin Command → AICharacter → Decide And Act.
+ * 5) Then repeatedly call Plugin Command → AICharacter → Decide And Act.
  *    You can loop it with a short Wait (e.g., 30 frames) between calls.
  * 
  * NPC MESSAGE WINDOW APPEARANCE
@@ -147,7 +159,8 @@
  * 
  * SECURITY
  * - For prototypes, set ApiKey directly. For release builds, prefer ProxyUrl so
- *   your key stays on your server.
+ *   your key stays on your server. When using LM Studio, no ApiKey is needed and
+ *   Authorization header is omitted by default.
  * 
  * ACTIONS
  * - move: targetX, targetY (tile coordinates). Engine will pathfind and take the first step.
@@ -156,7 +169,7 @@
  * - wait: ms (50-1000)
  * 
  * TERMS
- * MIT License. Note that the plugin is completely LLM generated and doesn't reflect my own coding skills :-).
+ * MIT License.
  */
 
 (() => {
@@ -166,10 +179,11 @@
 
     const params = PluginManager.parameters(pluginName);
     const apiKey = String(params["ApiKey"] || "");
-    const model = String(params["Model"] || "mistral-large-latest");
-    const provider = String(params["Provider"] || "mistral").toLowerCase();
+    const model = String(params["Model"] || "gemma-3-12b-it");
+    const provider = String(params["Provider"] || "lmstudio").toLowerCase();
     const apiBaseUrl = String(params["ApiBaseUrl"] || "https://api.mistral.ai/v1/chat/completions");
     const openAIBaseUrl = String(params["OpenAIBaseUrl"] || "https://api.openai.com/v1/chat/completions");
+    const lmStudioBaseUrl = String(params["LMStudioBaseUrl"] || "http://localhost:1234/v1/chat/completions");
     const proxyUrl = String(params["ProxyUrl"] || "");
     const temperature = Number(params["Temperature"] || 0.2);
     const maxTokens = Number(params["MaxTokens"] || 200);
@@ -219,6 +233,8 @@
     // Global action history configuration
     const MAX_GLOBAL_HISTORY = 100;
     const INCLUDE_MOVEMENT_IN_HISTORY = true; // Toggle to include/exclude movement entries
+    // Per-NPC memory configuration
+    const MAX_NPC_MEMORY = 100;
 
     function getGlobalHistory() {
         if (!$gameSystem._aiGlobalHistory) {
@@ -241,6 +257,40 @@
         window.AICharacter = window.AICharacter || {};
         window.AICharacter.addToGlobalHistory = addToGlobalHistory;
         window.AICharacter.getGlobalHistory = getGlobalHistory;
+        window.AICharacter.adjustNpcInventory = function (arg1, itemId, itemName, delta) {
+            try {
+                let mapId = $gameMap && $gameMap.mapId ? $gameMap.mapId() : 0;
+                let eventId = 0;
+                if (typeof arg1 === "number") {
+                    eventId = Math.floor(arg1);
+                } else if (arg1 && typeof arg1 === "object") {
+                    if (Number.isFinite(arg1.mapId)) mapId = Math.floor(arg1.mapId);
+                    if (Number.isFinite(arg1.eventId)) eventId = Math.floor(arg1.eventId);
+                }
+                if (eventId > 0 && mapId > 0) {
+                    adjustNpcInventory(mapId, eventId, itemId, itemName, delta);
+                }
+            } catch (_) { }
+        };
+        // Append a line to a specific NPC's memory on the current map or a provided mapId.
+        // Usage: addToNpcMemory(eventId, line) or addToNpcMemory({mapId, eventId}, line)
+        window.AICharacter.addToNpcMemory = function (arg1, line) {
+            try {
+                const trimmed = String(line == null ? "" : line).trim();
+                if (!trimmed) return;
+                let mapId = $gameMap && $gameMap.mapId ? $gameMap.mapId() : 0;
+                let eventId = 0;
+                if (typeof arg1 === "number") {
+                    eventId = Math.floor(arg1);
+                } else if (arg1 && typeof arg1 === "object") {
+                    if (Number.isFinite(arg1.mapId)) mapId = Math.floor(arg1.mapId);
+                    if (Number.isFinite(arg1.eventId)) eventId = Math.floor(arg1.eventId);
+                }
+                if (eventId > 0 && mapId > 0) {
+                    addToNpcMemory(mapId, eventId, trimmed);
+                }
+            } catch (_) { }
+        };
         // Prompt the player for a freeform reply to an NPC and log it to global history.
         // Accepts an NPC object with { id, name } or a plain string name.
         window.AICharacter.promptPlayerMessageToNpc = function (npcInfo) {
@@ -265,6 +315,31 @@
         return s.length > maxLen ? s.slice(0, maxLen - 1) + "…" : s;
     }
 
+    // Normalize LLM responses that wrap JSON in Markdown code fences (```json ... ```)
+    function cleanLlmTextToJsonString(text) {
+        let t = String(text == null ? "" : text);
+        if (!t) return t;
+        t = t.trim();
+        // If there's a fenced block anywhere, prefer its inner content
+        if (t.indexOf("```") !== -1) {
+            const first = t.indexOf("```");
+            const second = t.indexOf("```", first + 3);
+            if (second > first) {
+                let inner = t.slice(first + 3, second);
+                // Drop optional language tag like 'json' on the first line
+                inner = inner.replace(/^[a-zA-Z0-9_-]+\r?\n/, "");
+                t = inner.trim();
+            }
+        }
+        // Fallback: slice to the outermost braces if present
+        const firstBrace = t.indexOf("{");
+        const lastBrace = t.lastIndexOf("}");
+        if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+            return t.slice(firstBrace, lastBrace + 1).trim();
+        }
+        return t;
+    }
+
     function getStateMap() {
         if (!$gameSystem._aiCharacterState) {
             $gameSystem._aiCharacterState = {};
@@ -280,16 +355,63 @@
         const key = mapEventKey(mapId, eventId);
         const stateMap = getStateMap();
         if (!stateMap[key]) {
-            stateMap[key] = { description: "", memory: [], isThinking: false, currentGoal: "" };
+            stateMap[key] = { description: "", memory: [], isThinking: false, currentGoal: "", inventory: [] };
         }
         return stateMap[key];
+    }
+
+    function addToNpcMemory(mapId, eventId, line) {
+        const s = getOrCreateNpcState(mapId, eventId);
+        const entry = String(line == null ? "" : line).trim();
+        if (!entry) return;
+        s.memory.push(entry);
+        if (s.memory.length > MAX_NPC_MEMORY) {
+            s.memory.splice(0, s.memory.length - MAX_NPC_MEMORY);
+        }
+    }
+
+    function getNpcInventory(mapId, eventId) {
+        const s = getOrCreateNpcState(mapId, eventId);
+        if (!Array.isArray(s.inventory)) s.inventory = [];
+        return s.inventory;
+    }
+
+    function adjustNpcInventory(mapId, eventId, itemId, itemName, delta) {
+        const inv = getNpcInventory(mapId, eventId);
+        const id = Math.max(1, Math.floor(Number(itemId || 0)));
+        if (!Number.isFinite(id) || id <= 0) return;
+        const name = (itemName != null && String(itemName).trim().length > 0) ? String(itemName) : ($dataItems && $dataItems[id] ? String($dataItems[id].name || "Item " + id) : ("Item " + id));
+        const change = Math.floor(Number(delta || 0));
+        if (!Number.isFinite(change) || change === 0) return;
+        let entry = inv.find(e => e && e.id === id);
+        if (!entry) {
+            if (change > 0) {
+                entry = { id: id, name: name, qty: 0 };
+                inv.push(entry);
+            } else {
+                return; // nothing to remove
+            }
+        }
+        entry.name = name; // keep latest name
+        entry.qty = Math.max(0, Math.floor((entry.qty || 0) + change));
+        if (entry.qty <= 0) {
+            const idx = inv.indexOf(entry);
+            if (idx >= 0) inv.splice(idx, 1);
+        }
     }
 
     PluginManager.registerCommand(pluginName, "SetNPCDescription", function (args) {
         const startTime = new Date();
         console.log(`[AICharacter] BEGIN SetNPCDescription - ${startTime.toISOString()}`);
 
-        const description = args.description || "";
+        let description = args.description || "";
+        // Clean up line breaks: \n\n becomes \n, single \n becomes space
+        // First replace \n\n with a placeholder, then replace remaining \n with space, then restore placeholder to \n
+        const placeholder = "<<PARAGRAPH_BREAK>>";
+        description = description.replace(/\n\n/g, placeholder);
+        description = description.replace(/\n/g, " ");
+        description = description.replace(new RegExp(placeholder, "g"), "\n");
+
         const mapId = $gameMap.mapId();
         const eventId = this.eventId ? this.eventId() : 0;
         if (eventId <= 0) return;
@@ -360,7 +482,13 @@
         }
         state.isThinking = true;
 
-        const goal = (args.goal || "");
+        let goal = (args.goal || "");
+        // Clean up line breaks: \n\n becomes \n, single \n becomes space
+        const placeholder = "<<PARAGRAPH_BREAK>>";
+        goal = goal.replace(/\n\n/g, placeholder);
+        goal = goal.replace(/\n/g, " ");
+        goal = goal.replace(new RegExp(placeholder, "g"), "\n");
+
         const resultVariableId = Number(args.resultVariableId || 0) || 0;
         const switchPolicy = (args.switchPolicy || "");
         // Optional strict allowlist parsing: comma-separated numbers
@@ -434,8 +562,9 @@
                 const isAdjacent = distance === 1;
                 return { id: e.eventId(), name: e.event().name, x: e.x, y: e.y, distance: distance, isAdjacent: isAdjacent };
             });
+        const equipment = getNpcInventory(mapId, eventId).map(e => ({ id: e.id, name: e.name, qty: e.qty }));
         return {
-            npc: { id: eventId, name: npc.event().name, x: npc.x, y: npc.y, description: state.description },
+            npc: { id: eventId, name: npc.event().name, x: npc.x, y: npc.y, description: "This is you.", equipment: equipment },
             player: { x: player.x, y: player.y, distance: playerDistance, isAdjacent: playerIsAdjacent },
             others: otherNpcs,
             map: { id: mapId, width: $gameMap.width(), height: $gameMap.height(), displayName: ($dataMap && $dataMap.displayName) || "" },
@@ -444,33 +573,46 @@
     }
 
     async function callLlmForAction(env) {
-        const systemPrompt = "You control an NPC in a RPG Maker MZ game. Important: The whole game is in the German language. All characters talk in German. In the environment below your NPC is called 'npc'. Choose ONE action as JSON with keys: action.type in [move,speak,give,wait]. For move, DO NOT choose a direction; instead include targetX and targetY as tile coordinates of where you want to go (e.g., the player's coordinates). The engine will compute the path and take the first step. For speak include text; for give include itemId (number) and optional text to say; for wait include ms (500-1000). Output ONLY minified JSON.\n\nPROXIMITY POLICY:\n- Environment provides player.distance (Manhattan) and player.isAdjacent.\n- If player.isAdjacent is true, prefer speak/give/wait over move.\n- Apply the same consideration when interacting with 'others' entries that are adjacent.\nEXAMPLES:\n- Move toward player: {\"type\":\"move\",\"targetX\":player.x,\"targetY\":player.y}\n- Speak in German when adjacent: {\"type\":\"speak\",\"text\":\"…\"}";
+        const systemPrompt = "You control an NPC in a RPG Maker MZ game. The whole game is in German; respond in German. In the environment below your NPC is called 'npc'. Return EXACTLY ONE minified JSON object and nothing else (no backticks, no markdown, no explanations). Schema: an object with key \"type\" in [\"move\",\"speak\",\"give\",\"wait\"]. For move, DO NOT choose a direction; include integer \"targetX\" and \"targetY\" (tile coordinates) only — the engine pathfinds and takes the first step. For speak include \"text\". For give include numeric \"itemId\" and optional \"text\". For wait include \"ms\" (200-1000).\n\nEXAMPLE OUTPUTS (do not copy values):\n{\"type\":\"move\",\"targetX\":12,\"targetY\":7}\n{\"type\":\"speak\",\"text\":\"Hallo, Reisender!\"}\n{\"type\":\"give\",\"itemId\":1,\"text\":\"Nimm dies.\"}\n{\"type\":\"wait\",\"ms\":500}\n\nPROXIMITY POLICY:\n- Environment provides player.distance (Manhattan) and player.isAdjacent.\n- If player.isAdjacent is true, prefer speak/give/wait over move.\n- Apply the same consideration for 'others' that are adjacent.";
         const recentHistory = getGlobalHistory();
         const historyHeader = recentHistory.length ? "Recent history (latest last):\n" : "";
         const historyBlock = recentHistory.length ? historyHeader + recentHistory.join("\n") + "\n\n" : "";
         const userPrompt = historyBlock + "Environment:\n" + JSON.stringify(env, null, 2) + "\nChoose the next action.";
         const usingMistral = provider === "mistral";
+        const usingLmStudio = provider === "lmstudio";
         const body = {
             model: model,
-            //max_tokens: maxTokens,
             response_format: { type: "json_object" },
             messages: [
                 { role: "system", content: systemPrompt },
                 { role: "user", content: userPrompt }
             ]
         };
-        // Only include temperature for Mistral; GPT-5 models don't support it
-        if (usingMistral) {
+        // Only include temperature for Mistral/LM Studio; GPT-5 models don't support it
+        if (usingMistral || usingLmStudio) {
             body.temperature = temperature;
         }
-        const url = proxyUrl ? proxyUrl : (usingMistral ? apiBaseUrl : openAIBaseUrl);
+        // LM Studio OpenAI-compatible API may reject response_format; include explicit max_tokens
+        if (usingLmStudio) {
+            try { delete body.response_format; } catch (_) { }
+            body.max_tokens = Math.max(16, Math.floor(maxTokens));
+        }
+        // Resolve endpoint for LM Studio safely: avoid accidental GET-only endpoints like /v1/models
+        let url = proxyUrl ? proxyUrl : (usingMistral ? apiBaseUrl : (usingLmStudio ? lmStudioBaseUrl : openAIBaseUrl));
+        if (usingLmStudio && proxyUrl) {
+            const validLmEndpoints = /(\/v1\/(chat\/completions|responses|completions))$/i;
+            if (!validLmEndpoints.test(String(proxyUrl))) {
+                url = lmStudioBaseUrl; // force a valid POST endpoint
+            }
+        }
         const headers = { "Content-Type": "application/json" };
         if (!proxyUrl) {
-            if (!apiKey) {
-                // console.warn("[AICharacter] Missing ApiKey; cannot call provider.");
-                return null;
+            if (!usingLmStudio) {
+                if (!apiKey) {
+                    return null;
+                }
+                headers["Authorization"] = "Bearer " + apiKey;
             }
-            headers["Authorization"] = "Bearer " + apiKey;
         }
         // console.log("[AICharacter] Calling LLM API at", url, "with model", model);
         // console.log("[AICharacter] Request body:", JSON.stringify(body, null, 2));
@@ -495,7 +637,7 @@
             // console.log("[AICharacter] Failed to parse response as JSON, using raw text");
         }
         try {
-            const action = JSON.parse(content);
+            const action = JSON.parse(cleanLlmTextToJsonString(content));
             // console.log("[AICharacter] Parsed action JSON:", JSON.stringify(action));
             const sanitized = sanitizeAction(action);
             // console.log("[AICharacter] Sanitized action:", JSON.stringify(sanitized));
@@ -507,7 +649,7 @@
     }
 
     async function callLlmForGoal(env, npcDescription, goalText, switchPolicy) {
-        const systemPrompt = "You control an NPC in a RPG Maker MZ game. Important: The whole game is in the German language. All characters talk in German. In the environment below your NPC is called 'npc'. Pursue the given goal. Think first, then choose ONE immediate action that best advances the goal. Respond ONLY as JSON using the EXACT schema: action.type in [move,speak,give,wait,setSwitch]; for move include targetX and targetY (tile coordinates of the desired destination, e.g., the player's coordinates); for speak include text; for give include itemId (number) and optional text; for wait include ms (500-1000); for setSwitch include switchId (number) and value (true/false). The top-level object MUST be {action:{...},goal:{status,why}}. goal.status MUST be one of [achieved,failed,continue]. Do NOT set variables yourself; the engine will set the result variable. Do NOT use formats like 'speak=...'. Output ONLY minified JSON.\nIMPORTANT for move: For move, DO NOT choose a direction; instead include targetX and targetY as tile coordinates of where you want to go (e.g., the player's coordinates). The engine will compute the path and take the first step. .\nPROXIMITY POLICY:\nFor Player and other NPCs, the environment provides the distance to you and isAdjancent.\nGOAL EVALUATION:\n- After choosing the action, evaluate whether the goal is achieved, failed, or should continue, and include a short 'why'.";
+        const systemPrompt = "You control an NPC in a RPG Maker MZ game. The whole game is in German; respond in German. In the environment below your NPC is called 'npc'. Pursue the given goal. Understand the goal and how your character should fulfill it. Think deeply about the right first step to achieve the goal, then choose ONE immediate action that best advances the goal. Return EXACTLY ONE minified JSON object and nothing else (no backticks, no markdown, no explanations). EXACT schema: top-level must be {action:{...},goal:{status,why}}. action.type in [move,speak,give,wait,setSwitch]. For move include integer targetX and targetY (tile coordinates); DO NOT output a direction — the engine will pathfind and take the first step. For speak include text. For give include numeric itemId and optional text. For wait include ms (200-1000). For setSwitch include numeric switchId and boolean value. goal.status MUST be one of [achieved,failed,continue], and goal.why is a short reason. Do NOT use formats like 'speak=...'.\n\nEXAMPLE OUTPUT (do not copy values):\n{\"action\":{\"type\":\"speak\",\"text\":\"Guten Tag.\"},\"goal\":{\"status\":\"continue\",\"why\":\"Konversation beginnen.\"}}\n\nPROXIMITY POLICY:\n- Environment provides player.distance (Manhattan) and player.isAdjacent.\n\nGOAL EVALUATION:\n- After choosing the action, set goal.status to achieved/failed/continue and provide a short why.";
         const recentHistory = getGlobalHistory();
         const historyHeader = recentHistory.length ? "Recent history (latest last):\n" : "";
         const historyBlock = recentHistory.length ? historyHeader + recentHistory.join("\n") + "\n\n" : "";
@@ -517,6 +659,7 @@
         const userPrompt = historyBlock + descBlock + goalBlock + policyBlock + "Environment:\n" + JSON.stringify(env, null, 2) + "\nReturn only JSON with {action,goal}.";
 
         const usingMistral = provider === "mistral";
+        const usingLmStudio = provider === "lmstudio";
         const body = {
             model: model,
             response_format: { type: "json_object" },
@@ -525,14 +668,27 @@
                 { role: "user", content: userPrompt }
             ]
         };
-        if (usingMistral) {
+        if (usingMistral || usingLmStudio) {
             body.temperature = temperature;
         }
-        const url = proxyUrl ? proxyUrl : (usingMistral ? apiBaseUrl : openAIBaseUrl);
+        if (usingLmStudio) {
+            try { delete body.response_format; } catch (_) { }
+            body.max_tokens = Math.max(16, Math.floor(maxTokens));
+        }
+        // Resolve endpoint for LM Studio safely: avoid accidental GET-only endpoints like /v1/models
+        let url = proxyUrl ? proxyUrl : (usingMistral ? apiBaseUrl : (usingLmStudio ? lmStudioBaseUrl : openAIBaseUrl));
+        if (usingLmStudio && proxyUrl) {
+            const validLmEndpoints = /(\/v1\/(chat\/completions|responses|completions))$/i;
+            if (!validLmEndpoints.test(String(proxyUrl))) {
+                url = lmStudioBaseUrl; // force a valid POST endpoint
+            }
+        }
         const headers = { "Content-Type": "application/json" };
         if (!proxyUrl) {
-            if (!apiKey) return null;
-            headers["Authorization"] = "Bearer " + apiKey;
+            if (!usingLmStudio) {
+                if (!apiKey) return null;
+                headers["Authorization"] = "Bearer " + apiKey;
+            }
         }
         const resText = await httpPostJson(url, headers, body);
         if (!resText) return null;
@@ -548,7 +704,7 @@
             content = resText;
         }
         try {
-            const obj = JSON.parse(content);
+            const obj = JSON.parse(cleanLlmTextToJsonString(content));
             console.log("[AICharacter] callLlmForGoal parsed response:", JSON.stringify(obj, null, 2));
             const rawAction = obj.action || obj.Action || null;
             const rawGoal = obj.goal || obj.Goal || {};
@@ -894,6 +1050,10 @@
                     // Defer application to Window_Message.startMessage
                     setNpcMessageOverride(npcMessageBackground, npcMessagePosition);
                     $gameParty.gainItem(item, 1);
+                    // Decrement NPC inventory if tracked
+                    try {
+                        adjustNpcInventory($gameMap.mapId(), npc.eventId(), action.itemId, item.name, -1);
+                    } catch (_) { }
                     if (action.text) {
                         $gameMessage.add(name + ": " + action.text);
                     } else {
@@ -928,7 +1088,8 @@
                 const id = Number(action.variableId != null ? action.variableId : action.id || 0);
                 if (id > 0) {
                     $gameVariables.setValue(id, action.value);
-                    addToGlobalHistory(name + " sets Variable " + id + " to " + String(action.value));
+                    // don't add to history, it's too noisy, and I don't believe the LLM will have any use for it.
+                    //addToGlobalHistory(name + " sets Variable " + id + " to " + String(action.value));
                 }
                 break;
             }
@@ -972,6 +1133,5 @@
         });
     }
 })();
-
 
 

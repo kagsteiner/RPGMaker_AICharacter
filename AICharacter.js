@@ -114,6 +114,22 @@
  * @type note
  * @desc Describe the goal the NPC should pursue right now.
  * @default 
+ * 
+ * @command SetNPCItemQuantity
+ * @text Set NPC Item Quantity
+ * @desc Directly sets the quantity for a specific item in this NPC's inventory.
+ * @arg itemId
+ * @text Item ID
+ * @type number
+ * @min 1
+ * @desc Database ID of the item.
+ * @default 1
+ * @arg quantity
+ * @text Quantity
+ * @type number
+ * @min 0
+ * @desc New quantity to set (0 removes the item from inventory).
+ * @default 1
  * @arg resultVariableId
  * @text Result Variable
  * @type variable
@@ -272,6 +288,21 @@
                 }
             } catch (_) { }
         };
+        window.AICharacter.setNpcInventoryQuantity = function (arg1, itemId, itemName, quantity) {
+            try {
+                let mapId = $gameMap && $gameMap.mapId ? $gameMap.mapId() : 0;
+                let eventId = 0;
+                if (typeof arg1 === "number") {
+                    eventId = Math.floor(arg1);
+                } else if (arg1 && typeof arg1 === "object") {
+                    if (Number.isFinite(arg1.mapId)) mapId = Math.floor(arg1.mapId);
+                    if (Number.isFinite(arg1.eventId)) eventId = Math.floor(arg1.eventId);
+                }
+                if (eventId > 0 && mapId > 0) {
+                    setNpcInventoryQuantity(mapId, eventId, itemId, itemName, quantity);
+                }
+            } catch (_) { }
+        };
         // Append a line to a specific NPC's memory on the current map or a provided mapId.
         // Usage: addToNpcMemory(eventId, line) or addToNpcMemory({mapId, eventId}, line)
         window.AICharacter.addToNpcMemory = function (arg1, line) {
@@ -400,6 +431,27 @@
         }
     }
 
+    function setNpcInventoryQuantity(mapId, eventId, itemId, itemName, quantity) {
+        const inv = getNpcInventory(mapId, eventId);
+        const id = Math.max(1, Math.floor(Number(itemId || 0)));
+        if (!Number.isFinite(id) || id <= 0) return;
+        const name = (itemName != null && String(itemName).trim().length > 0) ? String(itemName) : ($dataItems && $dataItems[id] ? String($dataItems[id].name || "Item " + id) : ("Item " + id));
+        const qty = Math.max(0, Math.floor(Number(quantity || 0)));
+        let entry = inv.find(e => e && e.id === id);
+        if (!entry && qty > 0) {
+            entry = { id: id, name: name, qty: 0 };
+            inv.push(entry);
+        }
+        if (entry) {
+            entry.name = name;
+            entry.qty = qty;
+            if (entry.qty <= 0) {
+                const idx = inv.indexOf(entry);
+                if (idx >= 0) inv.splice(idx, 1);
+            }
+        }
+    }
+
     PluginManager.registerCommand(pluginName, "SetNPCDescription", function (args) {
         const startTime = new Date();
         console.log(`[AICharacter] BEGIN SetNPCDescription - ${startTime.toISOString()}`);
@@ -463,6 +515,22 @@
             const endTime = new Date();
             console.log(`[AICharacter] END DecideAndAct (error) - ${endTime.toISOString()}`);
         });
+    });
+
+    PluginManager.registerCommand(pluginName, "SetNPCItemQuantity", function (args) {
+        const startTime = new Date();
+        console.log(`[AICharacter] BEGIN SetNPCItemQuantity - ${startTime.toISOString()}`);
+        const mapId = $gameMap.mapId();
+        const eventId = this.eventId ? this.eventId() : 0;
+        if (eventId <= 0) return;
+        const rawItemId = Number(args.itemId || 0);
+        const rawQty = Number(args.quantity || 0);
+        const itemId = Math.max(1, Math.floor(isNaN(rawItemId) ? 0 : rawItemId));
+        const qty = Math.max(0, Math.floor(isNaN(rawQty) ? 0 : rawQty));
+        const name = ($dataItems && $dataItems[itemId]) ? ($dataItems[itemId].name || ("Item " + itemId)) : ("Item " + itemId);
+        setNpcInventoryQuantity(mapId, eventId, itemId, name, qty);
+        const endTime = new Date();
+        console.log(`[AICharacter] END SetNPCItemQuantity - ${endTime.toISOString()}`);
     });
 
     PluginManager.registerCommand(pluginName, "DecideTowardGoal", function (args) {

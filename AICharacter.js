@@ -12,7 +12,7 @@
  * @param Model
  * @text Model
  * @type string
- * @default gemma-3-12b-it
+ * @default mistral-large-latest
  * 
  * @param Provider
  * @text Provider
@@ -114,6 +114,21 @@
  * @type note
  * @desc Describe the goal the NPC should pursue right now.
  * @default 
+ * @arg resultVariableId
+ * @text Result Variable
+ * @type variable
+ * @desc Variable to set based on evaluation: 1=achieved, -1=failed, 0=continue
+ * @default 0
+ * @arg switchPolicy
+ * @text Switch Policy (optional)
+ * @type note
+ * @desc Guidance on which switches (IDs) may be toggled to achieve the goal.
+ * @default 
+ * @arg allowedSwitchIds
+ * @text Allowed Switch IDs (optional)
+ * @type string
+ * @desc Comma-separated switch IDs the NPC may toggle (e.g., "3,5,8"). Empty = no enforcement.
+ * @default 
  * 
  * @command SetNPCItemQuantity
  * @text Set NPC Item Quantity
@@ -155,7 +170,7 @@
  *    - "lmstudio" for local models via LM Studio (default; no API key required).
  *      Make sure LM Studio is running with the OpenAI-compatible server enabled.
  *      Default base URL: http://localhost:1234/v1/chat/completions
- *      Default model: gemma-3-12b-it
+ *      Default model: mistral-large-latest
  *    - "mistral" for Mistral API (requires ApiKey).
  *    - "openai" for GPT-5 mini/nano (requires ApiKey).
  * 3) Create an NPC event. Set a page to Parallel.
@@ -195,7 +210,7 @@
 
     const params = PluginManager.parameters(pluginName);
     const apiKey = String(params["ApiKey"] || "");
-    const model = String(params["Model"] || "gemma-3-12b-it");
+    const model = String(params["Model"] || "mistral-large-latest");
     const provider = String(params["Provider"] || "lmstudio").toLowerCase();
     const apiBaseUrl = String(params["ApiBaseUrl"] || "https://api.mistral.ai/v1/chat/completions");
     const openAIBaseUrl = String(params["OpenAIBaseUrl"] || "https://api.openai.com/v1/chat/completions");

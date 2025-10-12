@@ -16,7 +16,7 @@ Use the plugin in an RPGMaker MZ event to
 - Every NPC can have their own personality and background story that will affect their behavior.
 - Let an NPC roam on its own, minding its own business and interacting with the player and environment as it wishes.
 - Let an NPC pursue a goal, and react on whether it (believes it) has reached the goal, decided it failed, or wants to continue.
-- Let an NPC give the player an item (if the LLM decides it wants to).
+- Let an NPC trade items with the player (or other NPCs). NPCs can get items with a command, they can give them to the player, the player can give items to them.
 - NPCs that want to go to a certain coordinate automatically do thiw by finding the shortest path there.
 - Decide what LLM you want to use, how dialogs should look like and how they should be positioned.
 - The commands tell the LLM the location of Player and all Events including its own.
@@ -29,6 +29,13 @@ Commands of AICharacter:
 
 ### Set NPC Description
 - description: any text. Use it to tell the LLM name and features of this NPC, background story etc. Ensure that you use the same article for description and other commands (ie. always "you" or "she").
+
+### Set NPC Item Quantity
+The plugin features a very simple item system so that the LLM can give the player items. Currently they cannot equip items, use them to fight or so. They are just for trading. Install the plugin GiveItemToNPC, and the player gets a "Give..." option in the RPG's item menu. He can then select an adjacent NPC and the item will be transferred from the character's inventory to the NPC's inventory. Please note: The NPC inventory is _outside_ of RPGMaker, just in the plugin. When the LLM is invoked to decide what to do, its inventory is passed as part of its context. If an NPC decides to give the player an item, the NPC's inventory will be adjusted accordingly (either the quantity owned by the NPC is reduced or the item is completely removed).
+
+The command "Set NPC Item Quantity" can be used to programmatically set up the NPC's inventory. 
+- id: the item's id - look it up in RPGMaker.
+- quantity: the quantity. Set it to 3 and the NPC will own 3 of this kind.
 
 ### Decide And Act
 Based on what is written in the description, allow the NPC to choose any action. Possible actions the NPC can select are:
@@ -52,9 +59,13 @@ I suggest you use Mistral which is faster than OpenAI and okay-ish in terms of r
 
 ### AICharacter
 - LLM API Key: Go to Mistral.ai or OpenAI.com and get an API Key for your LLM. This will involve costs - playing with an LLM calls the LLM, which is not free.
-(I'm working on a version to integrate a local LLM)
-- Provider: either mistral or openai
-- Mistral API Base URL, OpenAI API Base URL: don't change (if you want to connect to a different LLM with the same API, like DeepSeek, changing this should work)
+- model: select a model. Every valid model name should work. Good entries:
+   - mistral: mistral-large-latest,
+   - openai: gpt-5-mini, gpt-5-nano, gpt-5 (if you are rich and patient),
+   - local: openai/gpt-oss-20b, 
+- Provider: either mistral or openai or lmstudio
+- Mistral API Base URL, OpenAI API Base URL: don't change (if you want to connect to a different LLM with the same API, like DeepSeek, changing this should work).
+- LM Studio API Base URL: if you use a non-standard LMStudio setup, adjust the URL accordingly.
 - Proxy URL: honestly, I don't know why ChatGPT found this important to generate. Leave empty.
 - Temperature: 0.20 - the lower the more predictable - Mistral only, the new GPT5 models don't support temperatures
 - Max Tokens: how many tokens max the LLM should generate. Also Mistral only.
@@ -63,9 +74,20 @@ I suggest you use Mistral which is faster than OpenAI and okay-ish in terms of r
 - NPC Message background: inherit, window, dim, transparant - like the setting for normal dialogs.
 - NPC Message position: inherit, top, middle, bottom - like the setting for normal dialogs.
 
+What to do:
+1. get yourself a Mistral API Key from mistral.ai. Note: by default you get a free tier which will only allow 1 request per second. If your level has 1 NPC it has to wait 60 frames after each command invocation!
+2. enter this key as LLM API Key
+3. select mistral as provider
+4. select mistral-large-latest as model
+5. Be happy. Pay money.
 ### ChatMenu
+A separate Plugin for a single purpose: chat with an adjacent NPC.
 - Enable Quick Chat Bar: enable and you get a chat bar (center bottom position) with a "chat" button so you can easily always start a chat.
 - Quick bar label: the text of the button to chat.
+
+### GiveItemToNPC
+A separate Plugin for a single purpose: Enhance the Item menu with a give... option to give an item to an NPC.
+Has no parameter.
 
 ## Example Event
 My most successful experiments go like this:
@@ -81,8 +103,7 @@ My most successful experiments go like this:
 - If a variable is non-zero when calling "Decide Towards Goal" the command can fail.
 - Sometimes the LLM is annoyingly chatty, and you get a new dialog every few seconds.
 - Player actions that are not chatting with the LLM are not added to the knowledge of the LLM yet.
-- 
-
+  
   
 
 

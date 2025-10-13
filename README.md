@@ -43,7 +43,8 @@ Based on what is written in the description, allow the NPC to choose any action.
 - Speak speaks the text the LLM wants to speak.
 - Give: gives an item to the Player. To do this properly, the description should mention the item exactly as called in RPGMaker's item list, including the id/index.
 - Set Switch: changes the switch of an item. Typically used with "Decide Toward Goal".
-- Wait: If the LLM doesn't know what to do, it can always wait between 500 ms and a second. 
+- Wait: If the LLM doesn't know what to do, it can always wait between 500 ms and a second.
+If the player performs a chat or give action towards this NPC while this command is running, it will be interrupted, no dialog or action is produced, the result variable remains unchanged. The user cannot detect this interruption, but in the normal loop this isn't required.
 
 ### Decide Toward Goal
 You specify a goal and the LLM tries to reach it.
@@ -51,6 +52,7 @@ You specify a goal and the LLM tries to reach it.
 - Result variable: when the LLM has finished this command, it will fill this variable with one of these values: 1 (LLM believes it has reached the goal), -1 (LLM believes it will be unable to reach the goal anymore), 0 (LLM wants to continue pursuing this goal). NOTE there is currently a bug that if the variable is 1 or -1 before calling the command, the command will not work. Either use different variables or initialize the variable to 0 before calling the command.
 - Switch Policy: describe which game switches the LLM should have available to manipulate, what they do, mwybe why it wants to use them to reach the goal.
 - Allowed Switch Ids: Comma-separated list of switches the LLM can switch. Note that I have never tried this out, but it might have potential.
+If the player performs a chat or give action towards this NPC while this command is running, it will be interrupted, no dialog or action is produced, the result variable remains unchanged. The user cannot detect this interruption, but in the normal loop this isn't required.
 
 ## Usage
 Put the two plugins AICharacter and ChatMenu into the js/plugins folder of your game. Then go to the plugin manager to define the following plugin parameters:
@@ -96,14 +98,13 @@ My most successful experiments go like this:
 3. Add a loop.
 4. Within the loop, do this:
    1. call "Decide Toward Goal". Select an unused variable to store the result of the command. Write a really crisp description of the goal to reach, and success/failure criteria the LLM will understand.
-   2. create an if-then-else statement that does things depending on the outcome. I typically create a second tab with condition "switch x is set", and set the switch when "Decide Toward Goal" returns 1 or -1. Also break the loop in these cases.
+   2. create an if-then-else statement that does things depending on the outcome - using the variable you decided for in step 1. I typically create a second tab with condition "switch x is set", and set the switch when "Decide Toward Goal" returns 1 or -1. Also break the loop in these cases.
    3. Add a short wait statement, e.g. 500 msec to 2 sec. Without this wait, the parallel event will eat all time and the UI will hang.
 
 ## known issues
 - If a variable is non-zero when calling "Decide Towards Goal" the command can fail.
 - Sometimes the LLM is annoyingly chatty, and you get a new dialog every few seconds.
 - Player actions that are not chatting with the LLM are not added to the knowledge of the LLM yet.
-- If the player acts, e.g. gives something to the NPC, the LLM thinking should be aborted. Now it will give you the answer about a situation that has changed.
   
   
 

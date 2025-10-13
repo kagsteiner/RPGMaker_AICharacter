@@ -103,6 +103,7 @@ My most successful experiments go like this:
 - If a variable is non-zero when calling "Decide Towards Goal" the command can fail.
 - Sometimes the LLM is annoyingly chatty, and you get a new dialog every few seconds.
 - Player actions that are not chatting with the LLM are not added to the knowledge of the LLM yet.
+- If the player acts, e.g. gives something to the NPC, the LLM thinking should be aborted. Now it will give you the answer about a situation that has changed.
   
   
 

@@ -845,7 +845,7 @@
             if (dir) safe.direction = dir;
             if (Number.isFinite(steps)) safe.steps = steps;
         } else if (safe.type === "speak") {
-            safe.text = String(actionData.text || "").slice(0, 240);
+            safe.text = String(actionData.text || "");
         } else if (safe.type === "give") {
             safe.itemId = Number(actionData.itemId || 1);
             safe.text = (actionData.text ? String(actionData.text) : "");
@@ -907,6 +907,43 @@
         }
 
         return lines.join("\n");
+    }
+
+    function splitTextIntoMessages(text, maxLen) {
+        const words = String(text || "").split(/\s+/);
+        const chunks = [];
+        let current = "";
+        for (let i = 0; i < words.length; i++) {
+            const w = words[i];
+            if (!w) continue;
+            if (current.length === 0) {
+                if (w.length <= maxLen) {
+                    current = w;
+                } else {
+                    // Very long single word: hard-split
+                    chunks.push(w.slice(0, maxLen));
+                    const rest = w.slice(maxLen);
+                    if (rest.length > 0) words.splice(i + 1, 0, rest);
+                    current = "";
+                }
+            } else if (current.length + 1 + w.length <= maxLen) {
+                current += " " + w;
+            } else {
+                chunks.push(current);
+                if (w.length <= maxLen) {
+                    current = w;
+                } else {
+                    // Very long single word: hard-split
+                    chunks.push(w.slice(0, maxLen));
+                    const rest = w.slice(maxLen);
+                    if (rest.length > 0) words.splice(i + 1, 0, rest);
+                    current = "";
+                }
+            }
+        }
+        if (current.length > 0) chunks.push(current);
+        if (chunks.length === 0) chunks.push("");
+        return chunks;
     }
 
     function validateActionAgainstCurrentState(action, npc) {
@@ -1085,21 +1122,22 @@
             }
             case "speak": {
                 if (action.text) {
-                    // console.log("[AICharacter] Speaking:", action.text);
-                    // Defer application to Window_Message.startMessage
-                    setNpcMessageOverride(npcMessageBackground, npcMessagePosition);
-                    const wrappedText = wrapTextForDialog(String(action.text));
-                    $gameMessage.setSpeakerName(name);
-                    $gameMessage.add(wrappedText);
+                    // Split long text into multiple message pages (<= 240 chars, whole words)
+                    const chunks = splitTextIntoMessages(String(action.text), 240);
                     if (interpreter && interpreter.setWaitMode) {
                         interpreter.setWaitMode("message");
                     }
+                    for (let i = 0; i < chunks.length; i++) {
+                        setNpcMessageOverride(npcMessageBackground, npcMessagePosition);
+                        const wrappedText = wrapTextForDialog(chunks[i]);
+                        $gameMessage.setSpeakerName(name);
+                        $gameMessage.add(wrappedText);
+                    }
                     addToGlobalHistory(name + " says \"" + shortenForHistory(action.text) + "\"");
-                    // Optional: offer a quick reply button inside the dialog
+                    // Optional: offer a quick reply button on the last page
                     if (enableReplyChoice && $gameMessage && $gameMessage.setChoices) {
                         try {
                             const choices = [replyChoiceLabel, "Weiter"];
-                            // default index = 0 (reply), cancel index = 1 (continue)
                             $gameMessage.setChoices(choices, 0, 1);
                             if ($gameMessage.setChoiceCallback) {
                                 $gameMessage.setChoiceCallback((n) => {
@@ -1108,7 +1146,6 @@
                                         if (typeof window !== "undefined" && window.AICharacter && typeof window.AICharacter.promptPlayerMessageToNpc === "function") {
                                             window.AICharacter.promptPlayerMessageToNpc(info);
                                         } else {
-                                            // Fallback prompt
                                             try {
                                                 const t = window.prompt("Nachricht an " + name + ":", "");
                                                 if (t && String(t).trim()) {

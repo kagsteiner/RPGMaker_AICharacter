@@ -234,6 +234,16 @@
             if (window.AICharacter && typeof window.AICharacter.addToGlobalHistory === "function") {
                 window.AICharacter.addToGlobalHistory(line);
             }
+            try {
+                if (window.AICharacter && typeof window.AICharacter.addToNpcMemory === "function") {
+                    window.AICharacter.addToNpcMemory({ mapId: $gameMap.mapId(), eventId: npc.id }, "Player says: \"" + String(text).trim() + "\"");
+                }
+            } catch (_) { }
+            try {
+                if (window.AICharacter && typeof window.AICharacter.invalidateNpcThinking === "function") {
+                    window.AICharacter.invalidateNpcThinking({ mapId: $gameMap.mapId(), eventId: npc.id });
+                }
+            } catch (_) { }
             // Optionally show it in-game immediately
             //$gameMessage.setSpeakerName("You");
             //$gameMessage.add(text.trim());

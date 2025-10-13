@@ -349,10 +349,33 @@
                 if (text && String(text).trim().length > 0) {
                     const trimmed = String(text).trim();
                     addToGlobalHistory("Player says to " + name + ": \"" + shortenForHistory(trimmed) + "\"");
+                    try {
+                        const mapId = $gameMap && $gameMap.mapId ? $gameMap.mapId() : 0;
+                        const eventId = (npcInfo && typeof npcInfo === "object" && Number.isFinite(npcInfo.id)) ? Math.floor(npcInfo.id) : 0;
+                        if (mapId > 0 && eventId > 0) {
+                            addToNpcMemory(mapId, eventId, "Player says: \"" + shortenForHistory(trimmed) + "\"");
+                            invalidateNpcThinking(mapId, eventId, "player_message");
+                        }
+                    } catch (_) { }
                 }
             } catch (_) {
                 // ignore prompt errors in non-browser contexts
             }
+        };
+        window.AICharacter.invalidateNpcThinking = function (arg1) {
+            try {
+                let mapId = $gameMap && $gameMap.mapId ? $gameMap.mapId() : 0;
+                let eventId = 0;
+                if (typeof arg1 === "number") {
+                    eventId = Math.floor(arg1);
+                } else if (arg1 && typeof arg1 === "object") {
+                    if (Number.isFinite(arg1.mapId)) mapId = Math.floor(arg1.mapId);
+                    if (Number.isFinite(arg1.eventId)) eventId = Math.floor(arg1.eventId);
+                }
+                if (eventId > 0 && mapId > 0) {
+                    invalidateNpcThinking(mapId, eventId, "external_api");
+                }
+            } catch (_) { }
         };
     }
 
@@ -401,7 +424,7 @@
         const key = mapEventKey(mapId, eventId);
         const stateMap = getStateMap();
         if (!stateMap[key]) {
-            stateMap[key] = { description: "", memory: [], isThinking: false, currentGoal: "", inventory: [] };
+            stateMap[key] = { description: "", memory: [], isThinking: false, currentGoal: "", inventory: [], thinkGen: 0, activeRequestGen: null, abortController: null };
         }
         return stateMap[key];
     }
@@ -506,13 +529,19 @@
             console.log(`[AICharacter] SKIP DecideAndAct (busy) - ${endTimeBusy.toISOString()}`);
             return;
         }
+        const requestGen = state.thinkGen || 0;
         state.isThinking = true;
+        state.activeRequestGen = requestGen;
+        let controller = null;
+        try { controller = new AbortController(); } catch (_) { controller = null; }
+        state.abortController = controller;
         const env = buildEnvironmentSnapshot(mapId, eventId, npc, state);
         // console.log("[AICharacter] DecideAndAct for event", eventId, "- Environment:", JSON.stringify(env, null, 2));
         const interpreter = this;
-        callLlmForAction(env).then(action => {
+        callLlmForAction(env, controller ? controller.signal : undefined).then(action => {
             try {
-                if (action) {
+                const stillCurrent = (state.thinkGen === requestGen);
+                if (action && stillCurrent) {
                     // Validate against current state to avoid stale moves
                     const validatedAction = validateActionAgainstCurrentState(action, npc);
                     performAction(validatedAction, npc, interpreter);
@@ -520,13 +549,21 @@
                     // console.warn("[AICharacter] No valid action returned for event", eventId);
                 }
             } finally {
-                state.isThinking = false;
+                if (state.activeRequestGen === requestGen) {
+                    state.isThinking = false;
+                    state.activeRequestGen = null;
+                    state.abortController = null;
+                }
             }
             const endTime = new Date();
             console.log(`[AICharacter] END DecideAndAct - ${endTime.toISOString()}`);
         }).catch(e => {
             // console.error("[AICharacter] LLM error for event", eventId, ":", e);
-            state.isThinking = false;
+            if (state.activeRequestGen === requestGen) {
+                state.isThinking = false;
+                state.activeRequestGen = null;
+                state.abortController = null;
+            }
             const endTime = new Date();
             console.log(`[AICharacter] END DecideAndAct (error) - ${endTime.toISOString()}`);
         });
@@ -563,7 +600,12 @@
             console.log(`[AICharacter] SKIP DecideTowardGoal (busy) - ${endTimeBusy.toISOString()}`);
             return;
         }
+        const requestGen = state.thinkGen || 0;
         state.isThinking = true;
+        state.activeRequestGen = requestGen;
+        let controller = null;
+        try { controller = new AbortController(); } catch (_) { controller = null; }
+        state.abortController = controller;
 
         let goal = (args.goal || "");
         // Clean up line breaks: \n\n becomes \n, single \n becomes space
@@ -591,9 +633,10 @@
         const env = buildEnvironmentSnapshot(mapId, eventId, npc, state);
         const interpreter = this;
 
-        callLlmForGoal(env, state.description, goal, switchPolicy).then(result => {
+        callLlmForGoal(env, state.description, goal, switchPolicy, controller ? controller.signal : undefined).then(result => {
             try {
-                if (result) {
+                const stillCurrent = (state.thinkGen === requestGen);
+                if (result && stillCurrent) {
                     let { action, status } = result;
                     // Prevent LLM from directly setting variables in goal flow; engine owns result variable
                     if (action && action.type === "setVariable") {
@@ -618,12 +661,20 @@
                     addToGlobalHistory(name + " evaluates goal: " + status + (resultVariableId > 0 ? (" (Var " + resultVariableId + "=" + resultValue + ")") : ""));
                 }
             } finally {
-                state.isThinking = false;
+                if (state.activeRequestGen === requestGen) {
+                    state.isThinking = false;
+                    state.activeRequestGen = null;
+                    state.abortController = null;
+                }
             }
             const endTime = new Date();
             console.log(`[AICharacter] END DecideTowardGoal - ${endTime.toISOString()}`);
         }).catch(e => {
-            state.isThinking = false;
+            if (state.activeRequestGen === requestGen) {
+                state.isThinking = false;
+                state.activeRequestGen = null;
+                state.abortController = null;
+            }
             const endTime = new Date();
             console.log(`[AICharacter] END DecideTowardGoal (error) - ${endTime.toISOString()}`);
         });
@@ -655,7 +706,7 @@
         };
     }
 
-    async function callLlmForAction(env) {
+    async function callLlmForAction(env, signal) {
         const systemPrompt = "You control an NPC in a RPG Maker MZ game. The whole game is in German; respond in German. In the environment below your NPC is called 'npc'. Return EXACTLY ONE minified JSON object and nothing else (no backticks, no markdown, no explanations). Schema: an object with key \"type\" in [\"move\",\"speak\",\"give\",\"wait\"]. For move, DO NOT choose a direction; include integer \"targetX\" and \"targetY\" (tile coordinates) only — the engine pathfinds and takes the first step. For speak include \"text\". For give include numeric \"itemId\" and optional \"text\". For wait include \"ms\" (200-1000).\n\nEXAMPLE OUTPUTS (do not copy values):\n{\"type\":\"move\",\"targetX\":12,\"targetY\":7}\n{\"type\":\"speak\",\"text\":\"Hallo, Reisender!\"}\n{\"type\":\"give\",\"itemId\":1,\"text\":\"Nimm dies.\"}\n{\"type\":\"wait\",\"ms\":500}\n\nPROXIMITY POLICY:\n- Environment provides player.distance (Manhattan) and player.isAdjacent.\n- If player.isAdjacent is true, prefer speak/give/wait over move.\n- Apply the same consideration for 'others' that are adjacent.";
         const recentHistory = getGlobalHistory();
         const historyHeader = recentHistory.length ? "Recent history (latest last):\n" : "";
@@ -699,7 +750,7 @@
         }
         // console.log("[AICharacter] Calling LLM API at", url, "with model", model);
         // console.log("[AICharacter] Request body:", JSON.stringify(body, null, 2));
-        const resText = await httpPostJson(url, headers, body);
+        const resText = await httpPostJson(url, headers, body, signal);
         // console.log("[AICharacter] Raw response:", resText);
         if (!resText) {
             // console.warn("[AICharacter] Empty response from API");
@@ -731,8 +782,8 @@
         }
     }
 
-    async function callLlmForGoal(env, npcDescription, goalText, switchPolicy) {
-        const systemPrompt = "You control an NPC in a RPG Maker MZ game. The whole game is in German; respond in German. In the environment below your NPC is called 'npc'. Pursue the given goal. Understand the goal and how your character should fulfill it. Think deeply about the right first step to achieve the goal, then choose ONE immediate action that best advances the goal. Return EXACTLY ONE minified JSON object and nothing else (no backticks, no markdown, no explanations). EXACT schema: top-level must be {action:{...},goal:{status,why}}. action.type in [move,speak,give,wait,setSwitch]. For move include integer targetX and targetY (tile coordinates); DO NOT output a direction — the engine will pathfind and take the first step. For speak include text. For give include numeric itemId and optional text. For wait include ms (200-1000). For setSwitch include numeric switchId and boolean value. goal.status MUST be one of [achieved,failed,continue], and goal.why is a short reason. Do NOT use formats like 'speak=...'.\n\nEXAMPLE OUTPUT (do not copy values):\n{\"action\":{\"type\":\"speak\",\"text\":\"Guten Tag.\"},\"goal\":{\"status\":\"continue\",\"why\":\"Konversation beginnen.\"}}\n\nPROXIMITY POLICY:\n- Environment provides player.distance (Manhattan) and player.isAdjacent.\n\nGOAL EVALUATION:\n- After choosing the action, set goal.status to achieved/failed/continue and provide a short why.";
+    async function callLlmForGoal(env, npcDescription, goalText, switchPolicy, signal) {
+        const systemPrompt = "You control an NPC in a RPG Maker MZ game. The whole game is in German; respond in German. In the environment below your NPC is called 'npc'. Pursue the given goal. Understand the goal and how your character should fulfill it. Think deeply about the right first step to achieve the goal, then choose ONE immediate action that best advances the goal. Return EXACTLY ONE minified JSON object and nothing else (no backticks, no markdown, no explanations). EXACT schema: top-level must be {action:{...},goal:{status,why}}. action.type in [move,speak,give,wait,setSwitch]. For move include integer targetX and targetY (tile coordinates); DO NOT output a direction — the engine will pathfind and take the first step. For speak include text. For give include numeric itemId and optional text. For wait include ms (e.g. 500). For setSwitch include numeric switchId and boolean value. goal.status MUST be one of [achieved,failed,continue], and goal.why is a short reason. Do NOT use formats like 'speak=...'.\n\nEXAMPLE OUTPUT (do not copy values):\n{\"action\":{\"type\":\"speak\",\"text\":\"Guten Tag.\"},\"goal\":{\"status\":\"continue\",\"why\":\"Konversation beginnen.\"}}\n\nPROXIMITY POLICY:\n- Environment provides player.distance (Manhattan) and player.isAdjacent.\n\nGOAL EVALUATION:\n- After choosing the action, set goal.status to achieved/failed/continue and provide a short why.";
         const recentHistory = getGlobalHistory();
         const historyHeader = recentHistory.length ? "Recent history (latest last):\n" : "";
         const historyBlock = recentHistory.length ? historyHeader + recentHistory.join("\n") + "\n\n" : "";
@@ -773,7 +824,7 @@
                 headers["Authorization"] = "Bearer " + apiKey;
             }
         }
-        const resText = await httpPostJson(url, headers, body);
+        const resText = await httpPostJson(url, headers, body, signal);
         if (!resText) return null;
         let content = null;
         try {
@@ -944,6 +995,21 @@
         if (current.length > 0) chunks.push(current);
         if (chunks.length === 0) chunks.push("");
         return chunks;
+    }
+
+    function invalidateNpcThinking(mapId, eventId, reason) {
+        try {
+            const state = getOrCreateNpcState(mapId, eventId);
+            state.thinkGen = (state.thinkGen || 0) + 1;
+            try {
+                if (state.abortController && typeof state.abortController.abort === "function") {
+                    state.abortController.abort();
+                }
+            } catch (_) { }
+            state.isThinking = false;
+            state.activeRequestGen = null;
+            state.abortController = null;
+        } catch (_) { }
     }
 
     function validateActionAgainstCurrentState(action, npc) {
@@ -1150,6 +1216,10 @@
                                                 const t = window.prompt("Nachricht an " + name + ":", "");
                                                 if (t && String(t).trim()) {
                                                     addToGlobalHistory("Player says to " + name + ": \"" + shortenForHistory(String(t).trim()) + "\"");
+                                                    try {
+                                                        addToNpcMemory($gameMap.mapId(), npc.eventId(), "Player says: \"" + shortenForHistory(String(t).trim()) + "\"");
+                                                        invalidateNpcThinking($gameMap.mapId(), npc.eventId(), "player_message");
+                                                    } catch (_) { }
                                                 }
                                             } catch (_) { }
                                         }
@@ -1234,9 +1304,9 @@
         }
     }
 
-    async function httpPostJson(url, headers, body) {
+    async function httpPostJson(url, headers, body, signal) {
         if (typeof fetch === "function") {
-            const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
+            const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body), signal });
             return await res.text();
         }
         return await new Promise((resolve, reject) => {
@@ -1246,6 +1316,14 @@
                 Object.keys(headers).forEach(k => xhr.setRequestHeader(k, headers[k]));
                 xhr.onload = () => resolve(xhr.responseText);
                 xhr.onerror = () => reject(new Error("Network error"));
+                try {
+                    if (signal && typeof signal.addEventListener === "function") {
+                        signal.addEventListener("abort", () => {
+                            try { xhr.abort(); } catch (_) { }
+                            reject(new Error("aborted"));
+                        });
+                    }
+                } catch (_) { }
                 xhr.send(JSON.stringify(body));
             } catch (e) {
                 reject(e);

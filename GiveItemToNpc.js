@@ -178,6 +178,13 @@
             }
         } catch (_) { }
 
+        // Invalidate NPC's ongoing thinking so it considers the new state immediately
+        try {
+            if (window.AICharacter && typeof window.AICharacter.invalidateNpcThinking === "function") {
+                window.AICharacter.invalidateNpcThinking({ mapId: $gameMap.mapId(), eventId: npc.id });
+            }
+        } catch (_) { }
+
         // Close picker and return
         this.onGiveNpcCancel();
     };

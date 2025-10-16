@@ -54,6 +54,12 @@
  * @type number
  * @default 200
  * 
+ * @param Language
+ * @text Language
+ * @type string
+ * @desc Language for NPC prompts (English word, e.g., German, English, French)
+ * @default German
+ * 
  * @param EnableReplyChoice
  * @text Enable Reply Choice
  * @type boolean
@@ -161,6 +167,25 @@
  * @desc Comma-separated switch IDs the NPC may toggle (e.g., "3,5,8"). Empty = no enforcement.
  * @default 
  * 
+ * @command GivePlayerCoins
+ * @text Give Player Coins
+ * @desc Transfers coins from this NPC to the player.
+ * @arg amount
+ * @text Amount (optional)
+ * @type number
+ * @min 1
+ * @desc If set, give this many coins (must be <= NPC coins). Empty = give all.
+ * @default 
+ * 
+ * @command SetNPCCoins
+ * @text Set NPC Coins
+ * @desc Sets this NPC's "$coins$" to a specific non-negative amount.
+ * @arg amount
+ * @text Amount
+ * @type number
+ * @min 0
+ * @default 0
+ * 
  * @help AICharacter.js
  * This plugin lets an NPC (event) decide its next action using Mistral, OpenAI, or LM Studio (local).
  * 
@@ -218,6 +243,7 @@
     const proxyUrl = String(params["ProxyUrl"] || "");
     const temperature = Number(params["Temperature"] || 0.2);
     const maxTokens = Number(params["MaxTokens"] || 200);
+    const language = String(params["Language"] || "German").trim();
     // Optional UX parameters
     const enableReplyChoice = String(params["EnableReplyChoice"] || "true").toLowerCase() === "true";
     const replyChoiceLabel = String(params["ReplyChoiceLabel"] || "Antworten…");
@@ -424,7 +450,7 @@
         const key = mapEventKey(mapId, eventId);
         const stateMap = getStateMap();
         if (!stateMap[key]) {
-            stateMap[key] = { description: "", memory: [], isThinking: false, currentGoal: "", inventory: [], thinkGen: 0, activeRequestGen: null, abortController: null };
+            stateMap[key] = { description: "", memory: [], isThinking: false, currentGoal: "", inventory: [], thinkGen: 0, activeRequestGen: null, abortController: null, coins: 0 };
         }
         return stateMap[key];
     }
@@ -443,6 +469,21 @@
         const s = getOrCreateNpcState(mapId, eventId);
         if (!Array.isArray(s.inventory)) s.inventory = [];
         return s.inventory;
+    }
+
+    // --- Coins helpers (mandatory equipment "$coins$") ---
+    function getNpcCoins(mapId, eventId) {
+        const s = getOrCreateNpcState(mapId, eventId);
+        const n = Math.max(0, Math.floor(Number(s.coins || 0)));
+        s.coins = n;
+        return n;
+    }
+
+    function setNpcCoins(mapId, eventId, amount) {
+        const s = getOrCreateNpcState(mapId, eventId);
+        const n = Math.max(0, Math.floor(Number(amount || 0)));
+        s.coins = n;
+        return n;
     }
 
     function adjustNpcInventory(mapId, eventId, itemId, itemName, delta) {
@@ -697,6 +738,9 @@
                 return { id: e.eventId(), name: e.event().name, x: e.x, y: e.y, distance: distance, isAdjacent: isAdjacent };
             });
         const equipment = getNpcInventory(mapId, eventId).map(e => ({ id: e.id, name: e.name, qty: e.qty }));
+        // Always include mandatory "$coins$" as non-negative qty
+        const coins = getNpcCoins(mapId, eventId);
+        equipment.unshift({ id: 0, name: "$coins$", qty: coins });
         return {
             npc: { id: eventId, name: npc.event().name, x: npc.x, y: npc.y, description: "This is you.", equipment: equipment },
             player: { x: player.x, y: player.y, distance: playerDistance, isAdjacent: playerIsAdjacent },
@@ -706,8 +750,39 @@
         };
     }
 
+    PluginManager.registerCommand(pluginName, "GivePlayerCoins", function (args) {
+        const mapId = $gameMap.mapId();
+        const eventId = this.eventId ? this.eventId() : 0;
+        if (eventId <= 0) return;
+        const npcCoins = getNpcCoins(mapId, eventId);
+        let amount = npcCoins;
+        if (args && args.amount != null && String(args.amount).length > 0) {
+            const raw = Number(args.amount);
+            const wanted = Math.floor(isNaN(raw) ? 0 : raw);
+            if (wanted > 0) amount = Math.min(wanted, npcCoins);
+        }
+        if (amount > 0 && $gameParty && typeof $gameParty.gainGold === "function") {
+            // Transfer coins: reduce NPC coins and increase player's gold
+            setNpcCoins(mapId, eventId, npcCoins - amount);
+            $gameParty.gainGold(amount);
+            try {
+                const name = ($gameMap.event(eventId) && $gameMap.event(eventId).event().name) || "NPC";
+                addToGlobalHistory(name + " gives player " + amount + " gold");
+            } catch (_) { }
+        }
+    });
+
+    PluginManager.registerCommand(pluginName, "SetNPCCoins", function (args) {
+        const mapId = $gameMap.mapId();
+        const eventId = this.eventId ? this.eventId() : 0;
+        if (eventId <= 0) return;
+        const raw = Number(args.amount || 0);
+        const amt = Math.max(0, Math.floor(isNaN(raw) ? 0 : raw));
+        setNpcCoins(mapId, eventId, amt);
+    });
+
     async function callLlmForAction(env, signal) {
-        const systemPrompt = "You control an NPC in a RPG Maker MZ game. The whole game is in German; respond in German. In the environment below your NPC is called 'npc'. Return EXACTLY ONE minified JSON object and nothing else (no backticks, no markdown, no explanations). Schema: an object with key \"type\" in [\"move\",\"speak\",\"give\",\"wait\"]. For move, DO NOT choose a direction; include integer \"targetX\" and \"targetY\" (tile coordinates) only — the engine pathfinds and takes the first step. For speak include \"text\". For give include numeric \"itemId\" and optional \"text\". For wait include \"ms\" (200-1000).\n\nEXAMPLE OUTPUTS (do not copy values):\n{\"type\":\"move\",\"targetX\":12,\"targetY\":7}\n{\"type\":\"speak\",\"text\":\"Hallo, Reisender!\"}\n{\"type\":\"give\",\"itemId\":1,\"text\":\"Nimm dies.\"}\n{\"type\":\"wait\",\"ms\":500}\n\nPROXIMITY POLICY:\n- Environment provides player.distance (Manhattan) and player.isAdjacent.\n- If player.isAdjacent is true, prefer speak/give/wait over move.\n- Apply the same consideration for 'others' that are adjacent.";
+        const systemPrompt = "You control an NPC in a RPG Maker MZ game. The whole game is in " + language + "; respond in " + language + ". In the environment below your NPC is called 'npc'. Return EXACTLY ONE minified JSON object and nothing else (no backticks, no markdown, no explanations). Schema: an object with key \"type\" in [\"move\",\"speak\",\"give\",\"wait\",\"giveCoins\"]. For move, DO NOT choose a direction; include integer \"targetX\" and \"targetY\" (tile coordinates) of where you would want to be only — the engine pathfinds and takes the first step. For speak include \"text\" and ensure you stay in character. For give include numeric \"itemId\" and optional \"text\". For giveCoins include integer \"coins\" (>0) not exceeding npc.equipment \"$coins$\" qty. For wait include \"ms\" (200-1000).\n\nEXAMPLE OUTPUTS (do not copy values):\n{\"type\":\"move\",\"targetX\":12,\"targetY\":7}\n{\"type\":\"speak\",\"text\":\"Hallo, Reisender!\"}\n{\"type\":\"give\",\"itemId\":1,\"text\":\"Nimm dies.\"}\n{\"type\":\"giveCoins\",\"coins\":5}\n{\"type\":\"wait\",\"ms\":500}\n\nPROXIMITY POLICY:\n- Environment provides player.distance (Manhattan) and player.isAdjacent.\n- If player.isAdjacent is true, prefer speak/give/giveCoins/wait over move.\n- Apply the same consideration for 'others' that are adjacent.";
         const recentHistory = getGlobalHistory();
         const historyHeader = recentHistory.length ? "Recent history (latest last):\n" : "";
         const historyBlock = recentHistory.length ? historyHeader + recentHistory.join("\n") + "\n\n" : "";
@@ -783,7 +858,7 @@
     }
 
     async function callLlmForGoal(env, npcDescription, goalText, switchPolicy, signal) {
-        const systemPrompt = "You control an NPC in a RPG Maker MZ game. The whole game is in German; respond in German. In the environment below your NPC is called 'npc'. Pursue the given goal. Understand the goal and how your character should fulfill it. Think deeply about the right first step to achieve the goal, then choose ONE immediate action that best advances the goal. Return EXACTLY ONE minified JSON object and nothing else (no backticks, no markdown, no explanations). EXACT schema: top-level must be {action:{...},goal:{status,why}}. action.type in [move,speak,give,wait,setSwitch]. For move include integer targetX and targetY (tile coordinates); DO NOT output a direction — the engine will pathfind and take the first step. For speak include text. For give include numeric itemId and optional text. For wait include ms (e.g. 500). For setSwitch include numeric switchId and boolean value. goal.status MUST be one of [achieved,failed,continue], and goal.why is a short reason. Do NOT use formats like 'speak=...'.\n\nEXAMPLE OUTPUT (do not copy values):\n{\"action\":{\"type\":\"speak\",\"text\":\"Guten Tag.\"},\"goal\":{\"status\":\"continue\",\"why\":\"Konversation beginnen.\"}}\n\nPROXIMITY POLICY:\n- Environment provides player.distance (Manhattan) and player.isAdjacent.\n\nGOAL EVALUATION:\n- After choosing the action, set goal.status to achieved/failed/continue and provide a short why.";
+        const systemPrompt = "You control an NPC in a RPG Maker MZ game. The whole game is in " + language + "; respond in " + language + ". In the environment below your NPC is called 'npc'. Pursue the given goal. Understand the goal and how your character should fulfill it. Think deeply about the right first step to achieve the goal, then choose ONE immediate action that best advances the goal. Return EXACTLY ONE minified JSON object and nothing else (no backticks, no markdown, no explanations). EXACT schema: top-level must be {action:{...},goal:{status,why}}. action.type in [move,speak,give,wait,setSwitch,giveCoins]. For move include integer targetX and targetY (tile coordinates) of where you want to be; DO NOT output a direction — the engine will pathfind and take the first step towards where you want to be. For speak include text and ensure you stay in character. For give include numeric itemId and optional text. For giveCoins include integer coins (>0) not exceeding npc.equipment \"$coins$\" qty. For wait include ms (e.g. 500). For setSwitch include numeric switchId and boolean value. goal.status MUST be one of [achieved,failed,continue], and goal.why is a short reason. Do NOT use formats like 'speak=...'.\n\nEXAMPLE OUTPUT (do not copy values):\n{\"action\":{\"type\":\"speak\",\"text\":\"Guten Tag.\"},\"goal\":{\"status\":\"continue\",\"why\":\"Konversation beginnen.\"}}\n\nPROXIMITY POLICY:\n- Environment provides player.distance (Manhattan) and player.isAdjacent.\n\nGOAL EVALUATION:\n- After choosing the action, set goal.status to achieved/failed/continue and provide a short why.";
         const recentHistory = getGlobalHistory();
         const historyHeader = recentHistory.length ? "Recent history (latest last):\n" : "";
         const historyBlock = recentHistory.length ? historyHeader + recentHistory.join("\n") + "\n\n" : "";
@@ -900,6 +975,10 @@
         } else if (safe.type === "give") {
             safe.itemId = Number(actionData.itemId || 1);
             safe.text = (actionData.text ? String(actionData.text) : "");
+        } else if (safe.type === "giveCoins") {
+            const raw = Number(actionData.coins != null ? actionData.coins : actionData.amount);
+            const n = Math.floor(isNaN(raw) ? 0 : raw);
+            safe.coins = Math.max(0, n);
         } else if (safe.type === "setSwitch") {
             // Allow switchId or id; coerce value to boolean
             const rawId = Number(actionData.switchId != null ? actionData.switchId : actionData.id || 0);
@@ -1256,6 +1335,23 @@
                     }
                 } else {
                     // console.warn("[AICharacter] Item ID", action.itemId, "not found in $dataItems");
+                }
+                break;
+            }
+            case "giveCoins": {
+                const npcCoins = getNpcCoins($gameMap.mapId(), npc.eventId());
+                const requested = Math.floor(Number(action.coins || 0));
+                const amount = Math.max(0, Math.min(npcCoins, isNaN(requested) ? 0 : requested));
+                if (amount > 0 && $gameParty && typeof $gameParty.gainGold === "function") {
+                    setNpcCoins($gameMap.mapId(), npc.eventId(), npcCoins - amount);
+                    $gameParty.gainGold(amount);
+                    addToGlobalHistory(name + " gives player " + amount + " gold");
+                    if (action.text) {
+                        $gameMessage.add(name + ": " + action.text);
+                    }
+                } else {
+                    const frames = Math.floor((action.ms || 200) / 16);
+                    interpreter.wait(frames);
                 }
                 break;
             }

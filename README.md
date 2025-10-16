@@ -97,7 +97,7 @@ What to do:
 4. select mistral-large-latest as model
 5. Be happy. Pay money.
 
-Or do the same with OpenAI.
+Or do the same with OpenAI - openai as provider, gpt-5 / gpt-5-mini / gpt-5-nano as model, LLM API Key from OpenAI
 
 Or try to go local:
 1. Install lmstudio from https://lmstudio.ai/

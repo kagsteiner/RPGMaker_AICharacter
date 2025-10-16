@@ -84,6 +84,7 @@ I suggest you use Mistral which is faster than OpenAI and okay-ish in terms of r
 - Proxy URL: honestly, I don't know why ChatGPT found this important to generate. Leave empty.
 - Temperature: 0.20 - the lower the more predictable - Mistral only, the new GPT5 models don't support temperatures
 - Max Tokens: how many tokens max the LLM should generate. Also Mistral only.
+- Language: the language that the LLM should communicate with. Should be in English like the prompts.
 - Enable reply choice: when the NPC talks to you, do you immediately want a Reply / Continue option?
 - Reply Choice label: The text of the button to reply.
 - NPC Message background: inherit, window, dim, transparant - like the setting for normal dialogs.
@@ -95,6 +96,17 @@ What to do:
 3. select mistral as provider
 4. select mistral-large-latest as model
 5. Be happy. Pay money.
+
+Or do the same with OpenAI.
+
+Or try to go local:
+1. Install lmstudio from https://lmstudio.ai/
+2. Go to the "models" tab and download a few good models. I recommend openai/gpt-oss-20b
+3. Go to the "developer" tab and start the server. Maybe preload the model.
+4. select lmstudio as provider
+5. select openai/gpt-oss-20b as the model
+6. Be not that happy. Don't pay money.
+
 ### ChatMenu
 A separate Plugin for a single purpose: chat with an adjacent NPC.
 - Enable Quick Chat Bar: enable and you get a chat bar (center bottom position) with a "chat" button so you can easily always start a chat.

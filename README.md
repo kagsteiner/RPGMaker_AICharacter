@@ -17,10 +17,12 @@ Use the plugin in an RPGMaker MZ event to
 - Let an NPC roam on its own, minding its own business and interacting with the player and environment as it wishes.
 - Let an NPC pursue a goal, and react on whether it (believes it) has reached the goal, decided it failed, or wants to continue.
 - Let an NPC trade items with the player (or other NPCs). NPCs can get items with a command, they can give them to the player, the player can give items to them.
-- NPCs that want to go to a certain coordinate automatically do thiw by finding the shortest path there.
+- Give an NPC money or take it from him, or let the LLM decide whether to give money to the player based on the prompt.
+- NPCs that want to go to a certain coordinate automatically do this by finding the shortest path there.
 - Decide what LLM you want to use, how dialogs should look like and how they should be positioned.
 - The commands tell the LLM the location of Player and all Events including its own.
 - The commands tell the LLM the complete interaction history.
+- Supports the languages the LLM supports.
 
 ## Commands
 ChatMenu has no command, it will create a "Chat" menu or a "Chat" button.
@@ -37,11 +39,22 @@ The command "Set NPC Item Quantity" can be used to programmatically set up the N
 - id: the item's id - look it up in RPGMaker.
 - quantity: the quantity. Set it to 3 and the NPC will own 3 of this kind.
 
+### Set NPC Coins
+The plugin stores how many coins the NPC has (initial 0). This commands sets it to any value.
+- amount: number of coins.
+
+Please note: the plugin ignores what currency you use in the game, it just works with coins. If you want your currency to be explicitly supported, you have to use a prompt like
+"In this game, coins have the currency Schlumpfmark". Ensure to mention the currency when talking about money.
+
+### Give Player Coins
+Takes away a number of coins (default: all) from the NPC and gives them to the player.
+
 ### Decide And Act
 Based on what is written in the description, allow the NPC to choose any action. Possible actions the NPC can select are:
 - Move (coordinate) tries to move to reach the coordinate. The plugin will take the first step on the shortest path to this coordinate.
 - Speak speaks the text the LLM wants to speak.
 - Give: gives an item to the Player. To do this properly, the description should mention the item exactly as called in RPGMaker's item list, including the id/index.
+- giveCoins: gives an amount of coints to the Player.
 - Set Switch: changes the switch of an item. Typically used with "Decide Toward Goal".
 - Wait: If the LLM doesn't know what to do, it can always wait between 500 ms and a second.
 If the player performs a chat or give action towards this NPC while this command is running, it will be interrupted, no dialog or action is produced, the result variable remains unchanged. The user cannot detect this interruption, but in the normal loop this isn't required.
@@ -103,7 +116,7 @@ My most successful experiments go like this:
 
 ## known issues
 - If a variable is non-zero when calling "Decide Towards Goal" the command can fail.
-- Sometimes the LLM is annoyingly chatty, and you get a new dialog every few seconds.
+- Sometimes the LLM is annoyingly chatty, and you get a new dialog every few seconds. Sometimes the LLM is not chatty at all. Prompts are tricky.
 - Player actions that are not chatting with the LLM are not added to the knowledge of the LLM yet.
   
   

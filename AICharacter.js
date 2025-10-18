@@ -17,7 +17,7 @@
  * @param Provider
  * @text Provider
  * @type string
- * @desc Provider to use: 'mistral', 'openai' (gpt-5-mini/nano), or 'lmstudio'
+ * @desc Provider to use: 'mistral', 'openai' (gpt-5-mini/nano), 'anthropic' (claude), or 'lmstudio'
  * @default mistral
  * 
  * @param ApiBaseUrl
@@ -34,6 +34,17 @@
  * @text LM Studio API Base URL
  * @type string
  * @default http://localhost:1234/v1/chat/completions
+ * 
+ * @param AnthropicBaseUrl
+ * @text Anthropic API Base URL
+ * @type string
+ * @default https://api.anthropic.com/v1/messages
+ * 
+ * @param AnthropicVersion
+ * @text Anthropic API Version
+ * @type string
+ * @desc Version header value for Anthropic (e.g., 2023-06-01, 2023-10-01)
+ * @default 2023-06-01
  * 
  * @param ProxyUrl
  * @text Proxy URL (optional)
@@ -198,6 +209,7 @@
  *      Default model: mistral-large-latest
  *    - "mistral" for Mistral API (requires ApiKey).
  *    - "openai" for GPT-5 mini/nano (requires ApiKey).
+ *    - "anthropic" for Claude models (requires ApiKey; default base URL uses Messages API)
  * 3) Create an NPC event. Set a page to Parallel.
  * 4) On that page, call Plugin Command → AICharacter → Set NPC Description once.
  *    Put your NPC background/character/situation in the description box.
@@ -240,6 +252,8 @@
     const apiBaseUrl = String(params["ApiBaseUrl"] || "https://api.mistral.ai/v1/chat/completions");
     const openAIBaseUrl = String(params["OpenAIBaseUrl"] || "https://api.openai.com/v1/chat/completions");
     const lmStudioBaseUrl = String(params["LMStudioBaseUrl"] || "http://localhost:1234/v1/chat/completions");
+    const anthropicBaseUrl = String(params["AnthropicBaseUrl"] || "https://api.anthropic.com/v1/messages");
+    const anthropicVersion = String(params["AnthropicVersion"] || "2023-06-01");
     const proxyUrl = String(params["ProxyUrl"] || "");
     const temperature = Number(params["Temperature"] || 0.2);
     const maxTokens = Number(params["MaxTokens"] || 200);
@@ -789,25 +803,39 @@
         const userPrompt = historyBlock + "Environment:\n" + JSON.stringify(env, null, 2) + "\nChoose the next action.";
         const usingMistral = provider === "mistral";
         const usingLmStudio = provider === "lmstudio";
-        const body = {
-            model: model,
-            response_format: { type: "json_object" },
-            messages: [
-                { role: "system", content: systemPrompt },
-                { role: "user", content: userPrompt }
-            ]
-        };
+        const usingAnthropic = provider === "anthropic";
+        let body = null;
+        if (usingAnthropic) {
+            body = {
+                model: model,
+                max_tokens: Math.max(64, Math.floor(maxTokens) || 256),
+                temperature: temperature,
+                system: systemPrompt,
+                messages: [
+                    { role: "user", content: userPrompt }
+                ]
+            };
+        } else {
+            body = {
+                model: model,
+                response_format: { type: "json_object" },
+                messages: [
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: userPrompt }
+                ]
+            };
+        }
         // Only include temperature for Mistral/LM Studio; GPT-5 models don't support it
-        if (usingMistral || usingLmStudio) {
+        if (!usingAnthropic && (usingMistral || usingLmStudio)) {
             body.temperature = temperature;
         }
         // LM Studio OpenAI-compatible API may reject response_format; include explicit max_tokens
-        if (usingLmStudio) {
+        if (!usingAnthropic && usingLmStudio) {
             try { delete body.response_format; } catch (_) { }
             body.max_tokens = Math.max(16, Math.floor(maxTokens));
         }
         // Resolve endpoint for LM Studio safely: avoid accidental GET-only endpoints like /v1/models
-        let url = proxyUrl ? proxyUrl : (usingMistral ? apiBaseUrl : (usingLmStudio ? lmStudioBaseUrl : openAIBaseUrl));
+        let url = proxyUrl ? proxyUrl : (usingAnthropic ? anthropicBaseUrl : (usingMistral ? apiBaseUrl : (usingLmStudio ? lmStudioBaseUrl : openAIBaseUrl)));
         if (usingLmStudio && proxyUrl) {
             const validLmEndpoints = /(\/v1\/(chat\/completions|responses|completions))$/i;
             if (!validLmEndpoints.test(String(proxyUrl))) {
@@ -816,10 +844,12 @@
         }
         const headers = { "Content-Type": "application/json" };
         if (!proxyUrl) {
-            if (!usingLmStudio) {
-                if (!apiKey) {
-                    return null;
-                }
+            if (usingAnthropic) {
+                if (!apiKey) return null;
+                headers["x-api-key"] = apiKey;
+                headers["anthropic-version"] = anthropicVersion;
+            } else if (!usingLmStudio) {
+                if (!apiKey) return null;
                 headers["Authorization"] = "Bearer " + apiKey;
             }
         }
@@ -834,16 +864,20 @@
         let content = null;
         try {
             const parsed = JSON.parse(resText);
-            if (parsed.choices && parsed.choices[0] && parsed.choices[0].message && parsed.choices[0].message.content) {
+            if (usingAnthropic) {
+                // Anthropic Messages API: { content: [ { type: "text", text: "..." }, ... ] }
+                if (parsed && Array.isArray(parsed.content) && parsed.content[0] && typeof parsed.content[0].text === "string") {
+                    content = parsed.content[0].text;
+                } else {
+                    content = resText;
+                }
+            } else if (parsed.choices && parsed.choices[0] && parsed.choices[0].message && parsed.choices[0].message.content) {
                 content = parsed.choices[0].message.content;
-                // console.log("[AICharacter] Extracted content from choices[0].message.content:", content);
             } else {
                 content = resText; // proxy may already return the action JSON
-                // console.log("[AICharacter] Using raw response as content (proxy mode?)");
             }
         } catch (_) {
             content = resText;
-            // console.log("[AICharacter] Failed to parse response as JSON, using raw text");
         }
         try {
             const action = JSON.parse(cleanLlmTextToJsonString(content));
@@ -869,23 +903,37 @@
 
         const usingMistral = provider === "mistral";
         const usingLmStudio = provider === "lmstudio";
-        const body = {
-            model: model,
-            response_format: { type: "json_object" },
-            messages: [
-                { role: "system", content: systemPrompt },
-                { role: "user", content: userPrompt }
-            ]
-        };
-        if (usingMistral || usingLmStudio) {
+        const usingAnthropic = provider === "anthropic";
+        let body = null;
+        if (usingAnthropic) {
+            body = {
+                model: model,
+                max_tokens: Math.max(64, Math.floor(maxTokens) || 256),
+                temperature: temperature,
+                system: systemPrompt,
+                messages: [
+                    { role: "user", content: userPrompt }
+                ]
+            };
+        } else {
+            body = {
+                model: model,
+                response_format: { type: "json_object" },
+                messages: [
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: userPrompt }
+                ]
+            };
+        }
+        if (!usingAnthropic && (usingMistral || usingLmStudio)) {
             body.temperature = temperature;
         }
-        if (usingLmStudio) {
+        if (!usingAnthropic && usingLmStudio) {
             try { delete body.response_format; } catch (_) { }
             body.max_tokens = Math.max(16, Math.floor(maxTokens));
         }
         // Resolve endpoint for LM Studio safely: avoid accidental GET-only endpoints like /v1/models
-        let url = proxyUrl ? proxyUrl : (usingMistral ? apiBaseUrl : (usingLmStudio ? lmStudioBaseUrl : openAIBaseUrl));
+        let url = proxyUrl ? proxyUrl : (usingAnthropic ? anthropicBaseUrl : (usingMistral ? apiBaseUrl : (usingLmStudio ? lmStudioBaseUrl : openAIBaseUrl)));
         if (usingLmStudio && proxyUrl) {
             const validLmEndpoints = /(\/v1\/(chat\/completions|responses|completions))$/i;
             if (!validLmEndpoints.test(String(proxyUrl))) {
@@ -894,7 +942,11 @@
         }
         const headers = { "Content-Type": "application/json" };
         if (!proxyUrl) {
-            if (!usingLmStudio) {
+            if (usingAnthropic) {
+                if (!apiKey) return null;
+                headers["x-api-key"] = apiKey;
+                headers["anthropic-version"] = anthropicVersion;
+            } else if (!usingLmStudio) {
                 if (!apiKey) return null;
                 headers["Authorization"] = "Bearer " + apiKey;
             }
@@ -904,7 +956,13 @@
         let content = null;
         try {
             const parsed = JSON.parse(resText);
-            if (parsed.choices && parsed.choices[0] && parsed.choices[0].message && parsed.choices[0].message.content) {
+            if (usingAnthropic) {
+                if (parsed && Array.isArray(parsed.content) && parsed.content[0] && typeof parsed.content[0].text === "string") {
+                    content = parsed.content[0].text;
+                } else {
+                    content = resText;
+                }
+            } else if (parsed.choices && parsed.choices[0] && parsed.choices[0].message && parsed.choices[0].message.content) {
                 content = parsed.choices[0].message.content;
             } else {
                 content = resText;

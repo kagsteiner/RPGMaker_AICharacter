@@ -70,16 +70,15 @@ If the player performs a chat or give action towards this NPC while this command
 ## Usage
 Put the two plugins AICharacter and ChatMenu into the js/plugins folder of your game. Then go to the plugin manager to define the following plugin parameters:
 
-I suggest you use Mistral which is faster than OpenAI and okay-ish in terms of reliability.
-
 ### AICharacter
-- LLM API Key: Go to Mistral.ai or OpenAI.com and get an API Key for your LLM. This will involve costs - playing with an LLM calls the LLM, which is not free.
+- LLM API Key: Go to Mistral.ai, anthropic.com or OpenAI.com and get an API Key for your LLM. This will involve costs - playing with an LLM calls the LLM, which is not free.
 - model: select a model. Every valid model name should work. Good entries:
-   - mistral: mistral-large-latest,
-   - openai: gpt-5-mini, gpt-5-nano, gpt-5 (if you are rich and patient),
-   - local: openai/gpt-oss-20b, 
-- Provider: either mistral or openai or lmstudio
-- Mistral API Base URL, OpenAI API Base URL: don't change (if you want to connect to a different LLM with the same API, like DeepSeek, changing this should work).
+   - mistral: mistral-large-latest - fast and quite expensive
+   - openai: gpt-5-mini (my recommendation, although slow), gpt-5-nano, gpt-5 (if you are rich and patient),
+   - anthropic: claude-haiku-4-5-20251001 (fast, great, expensive)
+   - local: openai/gpt-oss-20b (not up to more complex tasks), 
+- Provider: either mistral or openai or anthropic or lmstudio
+- Mistral API Base URL, Anthropic API Base URL, OpenAI API Base URL: don't change (if you want to connect to a different LLM with the same API, like DeepSeek, changing this should work).
 - LM Studio API Base URL: if you use a non-standard LMStudio setup, adjust the URL accordingly.
 - Proxy URL: honestly, I don't know why ChatGPT found this important to generate. Leave empty.
 - Temperature: 0.20 - the lower the more predictable - Mistral only, the new GPT5 models don't support temperatures
@@ -90,14 +89,14 @@ I suggest you use Mistral which is faster than OpenAI and okay-ish in terms of r
 - NPC Message background: inherit, window, dim, transparant - like the setting for normal dialogs.
 - NPC Message position: inherit, top, middle, bottom - like the setting for normal dialogs.
 
-What to do:
+What to do - Mistral:
 1. get yourself a Mistral API Key from mistral.ai. Note: by default you get a free tier which will only allow 1 request per second. If your level has 1 NPC it has to wait 60 frames after each command invocation!
 2. enter this key as LLM API Key
 3. select mistral as provider
 4. select mistral-large-latest as model
 5. Be happy. Pay money.
 
-Or do the same with OpenAI - openai as provider, gpt-5 / gpt-5-mini / gpt-5-nano as model, LLM API Key from OpenAI
+Or do the same with OpenAI - openai as provider, gpt-5 / gpt-5-mini / gpt-5-nano as model, LLM API Key from OpenAI, and the same with Anthropic.
 
 Or try to go local:
 1. Install lmstudio from https://lmstudio.ai/

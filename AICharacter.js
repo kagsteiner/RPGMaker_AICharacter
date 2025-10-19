@@ -1,6 +1,6 @@
 /*:
  * @target MZ
- * @plugindesc v1.2 NPC AI via Mistral, OpenAI, Anthropic, Deepseek, or LM Studio (local). 
+ * @plugindesc v1.3 NPC AI via Mistral, OpenAI, Anthropic, Deepseek, or LM Studio (local). 
  * @author You
  * 
  * @param ApiKey
@@ -314,15 +314,22 @@
     // Per-NPC memory configuration
     const MAX_NPC_MEMORY = 100;
 
-    function getGlobalHistory() {
-        if (!$gameSystem._aiGlobalHistory) {
-            $gameSystem._aiGlobalHistory = [];
+    // --- Per-map global state (history + last environment) ---
+    function getGlobalMapState(mapId) {
+        if (!$gameSystem._aiGlobalByMap) $gameSystem._aiGlobalByMap = {};
+        const id = Number.isFinite(mapId) ? Math.max(0, Math.floor(mapId)) : ($gameMap && $gameMap.mapId ? $gameMap.mapId() : 0);
+        if (!$gameSystem._aiGlobalByMap[id]) {
+            $gameSystem._aiGlobalByMap[id] = { history: [], lastEnvironment: null };
         }
-        return $gameSystem._aiGlobalHistory;
+        return $gameSystem._aiGlobalByMap[id];
     }
 
-    function addToGlobalHistory(line) {
-        const history = getGlobalHistory();
+    function getGlobalHistory(mapId) {
+        return getGlobalMapState(mapId).history;
+    }
+
+    function addToGlobalHistory(line, mapId) {
+        const history = getGlobalHistory(mapId);
         history.push(line);
         if (history.length > MAX_GLOBAL_HISTORY) {
             // Trim from the front to keep only the last MAX_GLOBAL_HISTORY
@@ -330,11 +337,20 @@
         }
     }
 
+    function setLastEnvironmentForMap(mapId, env) {
+        getGlobalMapState(mapId).lastEnvironment = env || null;
+    }
+
+    function getLastEnvironmentForMap(mapId) {
+        return getGlobalMapState(mapId).lastEnvironment;
+    }
+
     // Expose a minimal public API so other plugins (e.g., ChatMenu) can append to history.
     if (typeof window !== "undefined") {
         window.AICharacter = window.AICharacter || {};
         window.AICharacter.addToGlobalHistory = addToGlobalHistory;
         window.AICharacter.getGlobalHistory = getGlobalHistory;
+        window.AICharacter.getLastEnvironmentForMap = getLastEnvironmentForMap;
         window.AICharacter.adjustNpcInventory = function (arg1, itemId, itemName, delta) {
             try {
                 let mapId = $gameMap && $gameMap.mapId ? $gameMap.mapId() : 0;
@@ -598,9 +614,10 @@
         try { controller = new AbortController(); } catch (_) { controller = null; }
         state.abortController = controller;
         const env = buildEnvironmentSnapshot(mapId, eventId, npc, state);
+        try { setLastEnvironmentForMap(mapId, env); } catch (_) { }
         // console.log("[AICharacter] DecideAndAct for event", eventId, "- Environment:", JSON.stringify(env, null, 2));
         const interpreter = this;
-        callLlmForAction(env, controller ? controller.signal : undefined).then(action => {
+        callLlmForAction(env, state.description, controller ? controller.signal : undefined).then(action => {
             try {
                 const stillCurrent = (state.thinkGen === requestGen);
                 if (action && stillCurrent) {
@@ -693,6 +710,7 @@
         }
 
         const env = buildEnvironmentSnapshot(mapId, eventId, npc, state);
+        try { setLastEnvironmentForMap(mapId, env); } catch (_) { }
         const interpreter = this;
 
         callLlmForGoal(env, state.description, goal, switchPolicy, controller ? controller.signal : undefined).then(result => {
@@ -802,12 +820,14 @@
         setNpcCoins(mapId, eventId, amt);
     });
 
-    async function callLlmForAction(env, signal) {
+    async function callLlmForAction(env, npcDescription, signal) {
         const systemPrompt = "You control an NPC in a RPG Maker MZ game. The whole game is in " + language + "; respond in " + language + ". In the environment below your NPC is called 'npc'. Return EXACTLY ONE minified JSON object and nothing else (no backticks, no markdown, no explanations). Schema: an object with key \"type\" in [\"move\",\"speak\",\"give\",\"wait\",\"giveCoins\"]. For move, DO NOT choose a direction; include integer \"targetX\" and \"targetY\" (tile coordinates) of where you would want to be only — the engine pathfinds and takes the first step. For speak include \"text\" and ensure you stay in character. For give include numeric \"itemId\" and optional \"text\". For giveCoins include integer \"coins\" (>0) not exceeding npc.equipment \"$coins$\" qty. For wait include \"ms\" (200-1000).\n\nEXAMPLE OUTPUTS (do not copy values):\n{\"type\":\"move\",\"targetX\":12,\"targetY\":7}\n{\"type\":\"speak\",\"text\":\"Hallo, Reisender!\"}\n{\"type\":\"give\",\"itemId\":1,\"text\":\"Nimm dies.\"}\n{\"type\":\"giveCoins\",\"coins\":5}\n{\"type\":\"wait\",\"ms\":500}\n\nPROXIMITY POLICY:\n- Environment provides player.distance (Manhattan) and player.isAdjacent.\n- If player.isAdjacent is true, prefer speak/give/giveCoins/wait over move.\n- Apply the same consideration for 'others' that are adjacent.";
-        const recentHistory = getGlobalHistory();
+        const recentHistory = getGlobalHistory(env && env.map ? env.map.id : undefined);
         const historyHeader = recentHistory.length ? "Recent history (latest last):\n" : "";
         const historyBlock = recentHistory.length ? historyHeader + recentHistory.join("\n") + "\n\n" : "";
-        const userPrompt = historyBlock + "Environment:\n" + JSON.stringify(env, null, 2) + "\nChoose the next action.";
+        const descBlock = npcDescription ? ("NPC Description:\n" + String(npcDescription).trim() + "\n\n") : "";
+        const userPrompt = historyBlock + descBlock + "Environment:\n" + JSON.stringify(env, null, 2) + "\nChoose the next action.";
+        console.log("[AICharacter] callLlmForAction FULL PROMPT:\n=== SYSTEM ===\n" + systemPrompt + "\n=== USER ===\n" + userPrompt + "\n=== END PROMPT ===");
         const usingMistral = provider === "mistral";
         const usingLmStudio = provider === "lmstudio";
         const usingAnthropic = provider === "anthropic";
@@ -901,13 +921,14 @@
 
     async function callLlmForGoal(env, npcDescription, goalText, switchPolicy, signal) {
         const systemPrompt = "You control an NPC in a RPG Maker MZ game. The whole game is in " + language + "; respond in " + language + ". In the environment below your NPC is called 'npc'. Pursue the given goal. Understand the goal and how your character should fulfill it. Think deeply about the right first step to achieve the goal, then choose ONE immediate action that best advances the goal. Return EXACTLY ONE minified JSON object and nothing else (no backticks, no markdown, no explanations). EXACT schema: top-level must be {action:{...},goal:{status,why}}. action.type in [move,speak,give,wait,setSwitch,giveCoins]. For move include integer targetX and targetY (tile coordinates) of where you want to be; DO NOT output a direction — the engine will pathfind and take the first step towards where you want to be. For speak include text and ensure you stay in character. For give include numeric itemId and optional text. For giveCoins include integer coins (>0) not exceeding npc.equipment \"$coins$\" qty. For wait include ms (e.g. 500). For setSwitch include numeric switchId and boolean value. goal.status MUST be one of [achieved,failed,continue], and goal.why is a short reason. Do NOT use formats like 'speak=...'.\n\nEXAMPLE OUTPUT (do not copy values):\n{\"action\":{\"type\":\"speak\",\"text\":\"Guten Tag.\"},\"goal\":{\"status\":\"continue\",\"why\":\"Konversation beginnen.\"}}\n\nPROXIMITY POLICY:\n- Environment provides player.distance (Manhattan) and player.isAdjacent.\n\nGOAL EVALUATION:\n- After choosing the action, set goal.status to achieved/failed/continue and provide a short why.";
-        const recentHistory = getGlobalHistory();
+        const recentHistory = getGlobalHistory(env && env.map ? env.map.id : undefined);
         const historyHeader = recentHistory.length ? "Recent history (latest last):\n" : "";
         const historyBlock = recentHistory.length ? historyHeader + recentHistory.join("\n") + "\n\n" : "";
         const goalBlock = "Goal:\n" + String(goalText || "").trim() + "\n\n";
         const descBlock = npcDescription ? ("NPC Description:\n" + String(npcDescription).trim() + "\n\n") : "";
         const policyBlock = String(switchPolicy || "").trim() ? ("Switch Policy (allowed and when to use):\n" + String(switchPolicy).trim() + "\n\n") : "";
         const userPrompt = historyBlock + descBlock + goalBlock + policyBlock + "Environment:\n" + JSON.stringify(env, null, 2) + "\nReturn only JSON with {action,goal}.";
+        console.log("[AICharacter] callLlmForGoal FULL PROMPT:\n=== SYSTEM ===\n" + systemPrompt + "\n=== USER ===\n" + userPrompt + "\n=== END PROMPT ===");
 
         const usingMistral = provider === "mistral";
         const usingLmStudio = provider === "lmstudio";
@@ -1155,6 +1176,23 @@
             state.isThinking = false;
             state.activeRequestGen = null;
             state.abortController = null;
+        } catch (_) { }
+    }
+
+    function invalidateAllThinkingOnMap(mapId, reason) {
+        try {
+            const stateMap = getStateMap();
+            for (const key in stateMap) {
+                if (stateMap.hasOwnProperty(key)) {
+                    const parts = String(key).split(":");
+                    if (parts.length === 2 && Number(parts[0]) === mapId) {
+                        const eventId = Number(parts[1]);
+                        if (eventId > 0) {
+                            invalidateNpcThinking(mapId, eventId, reason);
+                        }
+                    }
+                }
+            }
         } catch (_) { }
     }
 
@@ -1493,6 +1531,18 @@
             }
         });
     }
+
+    // Hook into map setup to abort all thinking on the old map when transitioning
+    const _Game_Map_setup = Game_Map.prototype.setup;
+    Game_Map.prototype.setup = function (mapId) {
+        const oldMapId = this._mapId;
+        _Game_Map_setup.call(this, mapId);
+        // If changing to a different map, invalidate all active thinking on the old map
+        if (oldMapId > 0 && oldMapId !== mapId) {
+            console.log(`[AICharacter] Map transition: ${oldMapId} -> ${mapId}. Aborting all thinking on map ${oldMapId}.`);
+            invalidateAllThinkingOnMap(oldMapId, "map_transition");
+        }
+    };
 })();
 
 

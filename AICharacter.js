@@ -1,6 +1,6 @@
 /*:
  * @target MZ
- * @plugindesc v1.1 NPC AI via Mistral, OpenAI, or LM Studio (local). Set NPC description; decide and act. 
+ * @plugindesc v1.2 NPC AI via Mistral, OpenAI, Anthropic, Deepseek, or LM Studio (local). 
  * @author You
  * 
  * @param ApiKey
@@ -17,7 +17,7 @@
  * @param Provider
  * @text Provider
  * @type string
- * @desc Provider to use: 'mistral', 'openai' (gpt-5-mini/nano), 'anthropic' (claude), or 'lmstudio'
+ * @desc Provider to use: 'mistral', 'openai', 'anthropic', 'deepseek', or 'lmstudio'
  * @default mistral
  * 
  * @param ApiBaseUrl
@@ -45,6 +45,11 @@
  * @type string
  * @desc Version header value for Anthropic (e.g., 2023-06-01, 2023-10-01)
  * @default 2023-06-01
+
+ * @param DeepseekBaseUrl
+ * @text Deepseek API Base URL
+ * @type string
+ * @default https://api.deepseek.com/v1/chat/completions
  * 
  * @param ProxyUrl
  * @text Proxy URL (optional)
@@ -198,7 +203,7 @@
  * @default 0
  * 
  * @help AICharacter.js
- * This plugin lets an NPC (event) decide its next action using Mistral, OpenAI, or LM Studio (local).
+ * This plugin lets an NPC (event) decide its next action using Mistral, OpenAI, Anthropic, Deepseek, or LM Studio (local).
  * 
  * USAGE
  * 1) Enable the plugin.
@@ -208,8 +213,9 @@
  *      Default base URL: http://localhost:1234/v1/chat/completions
  *      Default model: mistral-large-latest
  *    - "mistral" for Mistral API (requires ApiKey).
- *    - "openai" for GPT-5 mini/nano (requires ApiKey).
+ *    - "openai" for GPT models (requires ApiKey).
  *    - "anthropic" for Claude models (requires ApiKey; default base URL uses Messages API)
+ *    - "deepseek" for Deepseek chat models (requires ApiKey; default base URL uses OpenAI-compatible Chat Completions)
  * 3) Create an NPC event. Set a page to Parallel.
  * 4) On that page, call Plugin Command → AICharacter → Set NPC Description once.
  *    Put your NPC background/character/situation in the description box.
@@ -254,6 +260,7 @@
     const lmStudioBaseUrl = String(params["LMStudioBaseUrl"] || "http://localhost:1234/v1/chat/completions");
     const anthropicBaseUrl = String(params["AnthropicBaseUrl"] || "https://api.anthropic.com/v1/messages");
     const anthropicVersion = String(params["AnthropicVersion"] || "2023-06-01");
+    const deepseekBaseUrl = String(params["DeepseekBaseUrl"] || "https://api.deepseek.com/v1/chat/completions");
     const proxyUrl = String(params["ProxyUrl"] || "");
     const temperature = Number(params["Temperature"] || 0.2);
     const maxTokens = Number(params["MaxTokens"] || 200);
@@ -804,6 +811,7 @@
         const usingMistral = provider === "mistral";
         const usingLmStudio = provider === "lmstudio";
         const usingAnthropic = provider === "anthropic";
+        const usingDeepseek = provider === "deepseek";
         let body = null;
         if (usingAnthropic) {
             body = {
@@ -825,8 +833,8 @@
                 ]
             };
         }
-        // Only include temperature for Mistral/LM Studio; GPT-5 models don't support it
-        if (!usingAnthropic && (usingMistral || usingLmStudio)) {
+        // Include temperature for providers that accept OpenAI-style params
+        if (!usingAnthropic && (usingMistral || usingLmStudio || usingDeepseek)) {
             body.temperature = temperature;
         }
         // LM Studio OpenAI-compatible API may reject response_format; include explicit max_tokens
@@ -835,7 +843,7 @@
             body.max_tokens = Math.max(16, Math.floor(maxTokens));
         }
         // Resolve endpoint for LM Studio safely: avoid accidental GET-only endpoints like /v1/models
-        let url = proxyUrl ? proxyUrl : (usingAnthropic ? anthropicBaseUrl : (usingMistral ? apiBaseUrl : (usingLmStudio ? lmStudioBaseUrl : openAIBaseUrl)));
+        let url = proxyUrl ? proxyUrl : (usingAnthropic ? anthropicBaseUrl : (usingMistral ? apiBaseUrl : (usingLmStudio ? lmStudioBaseUrl : (usingDeepseek ? deepseekBaseUrl : openAIBaseUrl))));
         if (usingLmStudio && proxyUrl) {
             const validLmEndpoints = /(\/v1\/(chat\/completions|responses|completions))$/i;
             if (!validLmEndpoints.test(String(proxyUrl))) {
@@ -904,6 +912,7 @@
         const usingMistral = provider === "mistral";
         const usingLmStudio = provider === "lmstudio";
         const usingAnthropic = provider === "anthropic";
+        const usingDeepseek = provider === "deepseek";
         let body = null;
         if (usingAnthropic) {
             body = {
@@ -925,7 +934,7 @@
                 ]
             };
         }
-        if (!usingAnthropic && (usingMistral || usingLmStudio)) {
+        if (!usingAnthropic && (usingMistral || usingLmStudio || usingDeepseek)) {
             body.temperature = temperature;
         }
         if (!usingAnthropic && usingLmStudio) {
@@ -933,7 +942,7 @@
             body.max_tokens = Math.max(16, Math.floor(maxTokens));
         }
         // Resolve endpoint for LM Studio safely: avoid accidental GET-only endpoints like /v1/models
-        let url = proxyUrl ? proxyUrl : (usingAnthropic ? anthropicBaseUrl : (usingMistral ? apiBaseUrl : (usingLmStudio ? lmStudioBaseUrl : openAIBaseUrl)));
+        let url = proxyUrl ? proxyUrl : (usingAnthropic ? anthropicBaseUrl : (usingMistral ? apiBaseUrl : (usingLmStudio ? lmStudioBaseUrl : (usingDeepseek ? deepseekBaseUrl : openAIBaseUrl))));
         if (usingLmStudio && proxyUrl) {
             const validLmEndpoints = /(\/v1\/(chat\/completions|responses|completions))$/i;
             if (!validLmEndpoints.test(String(proxyUrl))) {

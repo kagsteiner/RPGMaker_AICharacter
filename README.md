@@ -133,6 +133,7 @@ My most successful experiments go like this:
 - If a variable is non-zero when calling "Decide Towards Goal" the command can fail.
 - Sometimes the LLM is annoyingly chatty, and you get a new dialog every few seconds. Sometimes the LLM is not chatty at all. Prompts are tricky.
 - Player actions that are not chatting with the LLM are not added to the knowledge of the LLM yet.
+- There seems to be an issue when changing levels - once the event from the previous level kept chatting as the new event???
   
   
 

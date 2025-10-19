@@ -4,9 +4,12 @@ A plugin for RPGMaker MZ for characters controlled by LLMs
 ## Purpose
 NPCs for the RPGs you define wiht RPGMaker are clumsy to write and hard to write in a way that feels like an actual "non player character" (this holds true for most RPGs, actually).
 
-This plugin allows you to connect an LLM from Mistral, from OpenAI or from a local LMStudio LLM to an RPGMaker event, turning it into a character you can talk to, and to have much more lively interactions with. It's a bit experimental. It works, is fairly bug-free, but I have no clue if it is realiable enough for a real productiv RPG.
+This plugin allows you to connect an LLM from Mistral, from Deepseek, from Anthropic, from OpenAI or from a local LMStudio LLM to an RPGMaker event, turning it into a character you can talk to, and to have much more lively interactions with. It's a bit experimental. It works, is fairly bug-free, but I have no clue if it is realiable enough for a real productiv RPG.
 
 Try it out and decide for yourself.
+
+## Cost Warning
+Please note that if you ship a game with my plugin, *remove the API key from the plugin settings and tell the user they need to get their own*, or they will play at your LLM costs.
 
 ## Features
 Use the plugin in an RPGMaker MZ event to
@@ -76,9 +79,10 @@ Put the two plugins AICharacter and ChatMenu into the js/plugins folder of your 
    - mistral: mistral-large-latest - fast and quite expensive
    - openai: gpt-5-mini (my recommendation, although slow), gpt-5-nano, gpt-5 (if you are rich and patient),
    - anthropic: claude-haiku-4-5-20251001 (fast, great, expensive)
+   - deepseek: deepseek-chat (fast, quite good, my second recommendation)
    - local: openai/gpt-oss-20b (not up to more complex tasks), 
 - Provider: either mistral or openai or anthropic or lmstudio
-- Mistral API Base URL, Anthropic API Base URL, OpenAI API Base URL: don't change (if you want to connect to a different LLM with the same API, like DeepSeek, changing this should work).
+- Mistral API Base URL, Anthropic API Base URL, Deepseek Base URL, OpenAI API Base URL: don't change (if you want to connect to a different LLM with the same API, like DeepSeek, changing this should work).
 - LM Studio API Base URL: if you use a non-standard LMStudio setup, adjust the URL accordingly.
 - Proxy URL: honestly, I don't know why ChatGPT found this important to generate. Leave empty.
 - Temperature: 0.20 - the lower the more predictable - Mistral only, the new GPT5 models don't support temperatures
@@ -96,7 +100,7 @@ What to do - Mistral:
 4. select mistral-large-latest as model
 5. Be happy. Pay money.
 
-Or do the same with OpenAI - openai as provider, gpt-5 / gpt-5-mini / gpt-5-nano as model, LLM API Key from OpenAI, and the same with Anthropic.
+Or do the same with OpenAI - openai as provider, gpt-5 / gpt-5-mini / gpt-5-nano as model, LLM API Key from OpenAI, and the same with Anthropic and DeepSeek.
 
 Or try to go local:
 1. Install lmstudio from https://lmstudio.ai/

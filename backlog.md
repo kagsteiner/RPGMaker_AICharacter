@@ -5,3 +5,4 @@
 3. Fix the issue that dialog of an NPC giving you something is not correctly word wrapped
 4. Re-think the new feature of chatting to every event - should exclude non-NPC-events, but how?
 5. Groundwork for an eval - store all prompts + output in a file for analyzing
+6. Continue and publish nice example game, learning on the way

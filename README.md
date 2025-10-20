@@ -8,6 +8,8 @@ This plugin allows you to connect an LLM from Mistral, from Deepseek, from Anthr
 
 Try it out and decide for yourself.
 
+Be aware of the #1 issue: for every NPC that works towards a goal, please use a different game variable to track goal progress.
+
 ## Cost Warning
 Please note that if you ship a game with my plugin, *remove the API key from the plugin settings and tell the user they need to get their own*, or they will play at your LLM costs.
 

@@ -7,5 +7,6 @@
 * fix the issue that you cannot reuse variables that mark goal success
 * Re-think the new feature of chatting to every event - should exclude non-NPC-events, but how?
 * Continue and publish nice example game, learning on the way
+* Can a Event move to a different level?
 
 (not sorted at all, I do what I find most fun first :-) )

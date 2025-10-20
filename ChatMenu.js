@@ -1,6 +1,6 @@
 /*:
  * @target MZ
- * @plugindesc v1.1 Adds a "Chat" menu, an NPC picker, and an optional quick chat bar on the map.
+ * @plugindesc v1.2 Adds a "Chat" menu, an NPC picker, and an optional quick chat bar on the map.
  * @author You
  * 
  * @param EnableQuickBar
@@ -14,9 +14,41 @@
  * @type string
  * @default Chat…
  * 
+ * @param ChatTargetIncludeTag
+ * @text Include Tag
+ * @type string
+ * @desc Note tag to explicitly include an event as a chat target (e.g., <ChatTarget>)
+ * @default ChatTarget
+ * 
+ * @param ChatTargetExcludeTag
+ * @text Exclude Tag
+ * @type string
+ * @desc Note tag to explicitly exclude an event from chat targets (e.g., <NoChat>)
+ * @default NoChat
+ * 
+ * @param UntaggedChatTargetsIncluded
+ * @text Untagged Included By Default
+ * @type boolean
+ * @desc true: events without include/exclude tags are included. false: only tagged are included.
+ * @default true
+ * 
+ * @param RestrictChatToNearbyNPCs
+ * @text Restrict Chat To Nearby NPCs
+ * @type boolean
+ * @desc true: only adjacent NPCs are chat targets. false: any NPC on the current map.
+ * @default true
+ * 
+ * @command RestrictChatToNearbyNPCs
+ * @text Set Chat Scope: Nearby Only
+ * @desc Toggle whether the Chat menu is restricted to adjacent NPCs.
+ * @arg value
+ * @text Nearby Only
+ * @type boolean
+ * @default true
+ * 
  * @help ChatMenu.js
  * Adds a new "Chat" command to the main menu and a simple Chat scene to pick
- * an adjacent NPC and send a message. Optionally shows a compact quick chat bar
+ * an adjacent NPC (or any NPC, configurable) and send a message. Optionally shows a compact quick chat bar
  * on the map so the player can quickly type a message.
  * 
  * Usage:
@@ -34,6 +66,63 @@
     const params = PluginManager.parameters(pluginName);
     const enableQuickBar = String(params["EnableQuickBar"] || "true").toLowerCase() === "true";
     const quickBarLabel = String(params["QuickBarLabel"] || "Chat…");
+    const includeTagName = String(params["ChatTargetIncludeTag"] || "ChatTarget").trim();
+    const excludeTagName = String(params["ChatTargetExcludeTag"] || "NoChat").trim();
+    const untaggedIncluded = String(params["UntaggedChatTargetsIncluded"] || "true").toLowerCase() === "true";
+    const restrictNearbyDefault = String(params["RestrictChatToNearbyNPCs"] || "true").toLowerCase() === "true";
+    // --- Notetag helpers ---
+    function ChatMenu_eventMeta(ev) {
+        try {
+            const data = ev && ev.event && ev.event();
+            if (!data) return { note: "", meta: {} };
+            const note = String(data.note || "");
+            const meta = data.meta || {};
+            return { note, meta };
+        } catch (_) { return { note: "", meta: {} }; }
+    }
+
+    function ChatMenu_metaHasKey(meta, keyLower) {
+        try {
+            for (const k in meta) {
+                if (Object.prototype.hasOwnProperty.call(meta, k)) {
+                    if (String(k).toLowerCase() === keyLower) return true;
+                }
+            }
+        } catch (_) { }
+        return false;
+    }
+
+    function ChatMenu_noteHasTag(note, tagLower) {
+        try {
+            if (!note) return false;
+            const re = new RegExp("<" + tagLower.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&") + "(\\:[^>]*)?>", "i");
+            return re.test(note);
+        } catch (_) { return false; }
+    }
+
+    function ChatMenu_isEventChatTarget(ev) {
+        const { note, meta } = ChatMenu_eventMeta(ev);
+        const inc = String(includeTagName || "").trim().toLowerCase();
+        const exc = String(excludeTagName || "").trim().toLowerCase();
+        if (exc && (ChatMenu_metaHasKey(meta, exc) || ChatMenu_noteHasTag(note, exc))) return false;
+        if (inc && (ChatMenu_metaHasKey(meta, inc) || ChatMenu_noteHasTag(note, inc))) return true;
+        return !!untaggedIncluded;
+    }
+
+
+    // Runtime flag stored in save data
+    function ChatMenu_isNearbyOnly() {
+        try {
+            if ($gameSystem && typeof $gameSystem._chatNearbyOnly === "boolean") return $gameSystem._chatNearbyOnly;
+        } catch (_) { }
+        return restrictNearbyDefault;
+    }
+
+    PluginManager.registerCommand(pluginName, "RestrictChatToNearbyNPCs", function (args) {
+        const v = String(args && args.value != null ? args.value : "").trim().toLowerCase();
+        const flag = (v === "true" || v === "on" || v === "1");
+        if ($gameSystem) $gameSystem._chatNearbyOnly = flag;
+    });
 
     // 1) Inject "Chat" into the main menu command list
     const _Window_MenuCommand_addOriginalCommands = Window_MenuCommand.prototype.addOriginalCommands;
@@ -69,8 +158,8 @@
     Scene_Chat.prototype.create = function () {
         Scene_MenuBase.prototype.create.call(this);
         this.createHelpWindow();
-        this._helpWindow.setText("Chat\nChoose an adjacent NPC to chat with.");
-        this._adjacent = this.findAdjacentNpcs();
+        this._helpWindow.setText(ChatMenu_isNearbyOnly() ? "Chat\nChoose an adjacent NPC to chat with." : "Chat\nChoose an NPC to chat with.");
+        this._npcs = this.findSelectableNpcs();
         this.createNpcListWindow();
     };
 
@@ -80,7 +169,7 @@
 
     Scene_Chat.prototype.createNpcListWindow = function () {
         const rect = this.npcListWindowRect();
-        this._npcWindow = new Window_ChatNpcList(rect, this._adjacent);
+        this._npcWindow = new Window_ChatNpcList(rect, this._npcs);
         this._npcWindow.setHandler("ok", this.onNpcOk.bind(this));
         this._npcWindow.setHandler("cancel", this.popScene.bind(this));
         this.addWindow(this._npcWindow);
@@ -96,19 +185,12 @@
         return new Rectangle(wx, wy, ww, wh);
     };
 
-    Scene_Chat.prototype.findAdjacentNpcs = function () {
-        const player = $gamePlayer;
-        const px = player.x;
-        const py = player.y;
-        // Adjacent = Manhattan distance 1
-        const events = $gameMap.events();
-        const adj = events.filter(e => {
-            const dx = Math.abs(e.x - px);
-            const dy = Math.abs(e.y - py);
-            const isSelf = false; // Player is not an event; no need to filter self
-            return !isSelf && dx + dy === 1;
-        }).map(e => ({ id: e.eventId(), name: e.event().name || ("Event " + e.eventId()), x: e.x, y: e.y }));
-        return adj;
+    Scene_Chat.prototype.findSelectableNpcs = function () {
+        const source = ChatMenu_isNearbyOnly() ? ChatMenu_findAdjacentNpcs() : ChatMenu_findAllNpcs();
+        return source.filter(n => {
+            const ev = $gameMap.event(n.id);
+            return ev && ChatMenu_isEventChatTarget(ev);
+        });
     };
 
     Scene_Chat.prototype.onNpcOk = function () {
@@ -148,14 +230,14 @@
     };
 
     Scene_Map.prototype.onQuickBarOk = function () {
-        // If exactly one adjacent NPC, prompt directly; else push NPC picker.
-        const adj = ChatMenu_findAdjacentNpcs();
-        if (adj.length === 1) {
-            ChatMenu_promptToNpc(adj[0]);
-        } else if (adj.length > 1) {
+        // If exactly one selectable NPC, prompt directly; else push NPC picker.
+        const list = ChatMenu_findSelectableNpcs();
+        if (list.length === 1) {
+            ChatMenu_promptToNpc(list[0]);
+        } else if (list.length > 1) {
             SceneManager.push(Scene_Chat);
         } else {
-            $gameMessage.add("No adjacent NPCs");
+            $gameMessage.add(ChatMenu_isNearbyOnly() ? "No adjacent NPCs" : "No NPCs on this map");
         }
         if (this._chatQuickBar) this._chatQuickBar.deactivate();
     };
@@ -171,6 +253,18 @@
             return dx + dy === 1;
         }).map(e => ({ id: e.eventId(), name: e.event().name || ("Event " + e.eventId()), x: e.x, y: e.y }));
         return adj;
+    }
+
+    function ChatMenu_findAllNpcs() {
+        return $gameMap.events().map(e => ({ id: e.eventId(), name: e.event().name || ("Event " + e.eventId()), x: e.x, y: e.y }));
+    }
+
+    function ChatMenu_findSelectableNpcs() {
+        const source = ChatMenu_isNearbyOnly() ? ChatMenu_findAdjacentNpcs() : ChatMenu_findAllNpcs();
+        return source.filter(n => {
+            const ev = $gameMap.event(n.id);
+            return ev && ChatMenu_isEventChatTarget(ev);
+        });
     }
 
     function ChatMenu_promptToNpc(npc) {
@@ -276,7 +370,7 @@
         const rect = this.itemLineRect(index);
         if (this._npcs.length === 0) {
             this.changeTextColor(ColorManager.textColor(8));
-            this.drawText("No adjacent NPCs", rect.x, rect.y, rect.width, "left");
+            this.drawText(ChatMenu_isNearbyOnly() ? "No adjacent NPCs" : "No NPCs on this map", rect.x, rect.y, rect.width, "left");
             this.resetTextColor();
             return;
         }

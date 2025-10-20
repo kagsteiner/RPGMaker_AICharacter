@@ -6,3 +6,4 @@
 4. Re-think the new feature of chatting to every event - should exclude non-NPC-events, but how?
 5. Groundwork for an eval - store all prompts + output in a file for analyzing
 6. Continue and publish nice example game, learning on the way
+7. Weapons and armor support. Probably most RPGs want that. Although I believe it is much less important once you can really interact

@@ -111,10 +111,15 @@ Or try to go local:
 6. Be not that happy. Don't pay money.
 
 ### ChatMenu
-A separate Plugin for a single purpose: chat with an adjacent NPC.
+A separate Plugin for a single purpose: actively initiate a chat with an NPC. You have a fine-grained control over which events you want to be enabled or disabled as "chat target". The plugin uses note tags for this. Enter the right note tag in the "Notes" (German: Hinweis) textfield next to the name of the event.
+The Plugin has several parameters that influence its behavior:
 - Enable Quick Chat Bar: enable and you get a chat bar (center bottom position) with a "chat" button so you can easily always start a chat.
 - Quick bar label: the text of the button to chat.
-
+- Include Tag: Name of the note tag that you have to use to mark an event as chat target. Default is ChatTarget, ie. use the note tag \<ChatTarget\>
+- Exclude Tag: Name of the note tag that you have to use to mark an event as no chat target. Default is NoChat, ie. use the note tag \<NoChat\>
+- Untagged included by default: whether an event that has not been marked by any tag should be a chat target.
+- Restrict chat to nearby: select this if you only want to be able to chat to NPCs that are next to you.
+ 
 ### GiveItemToNPC
 A separate Plugin for a single purpose: Enhance the Item menu with a give... option to give an item to an NPC.
 Has no parameter.

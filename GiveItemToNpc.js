@@ -1,6 +1,6 @@
 /*:
  * @target MZ
- * @plugindesc v1.0 Add "Give to NPC" flow in Item menu: pick adjacent NPC, decrement item, log histories.
+ * @plugindesc v1.4 Add "Give to NPC" flow in Item menu: pick adjacent NPC, decrement item, log histories.
  * @author You
  * 
  * @help GiveItemToNpc.js
@@ -185,8 +185,10 @@
             }
         } catch (_) { }
 
-        // Close picker and return
-        this.onGiveNpcCancel();
+        // Quick fix: clear any queued/stale NPC messages and close back to map
+        try { if ($gameMessage && $gameMessage.clear) { $gameMessage.clear(); } } catch (_) { }
+        SceneManager.goto(Scene_Map);
+        return;
     };
 
     function findAdjacentNpcs() {

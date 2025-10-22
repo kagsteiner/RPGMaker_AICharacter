@@ -1,6 +1,6 @@
 /*:
  * @target MZ
- * @plugindesc v1.3 NPC AI via Mistral, OpenAI, Anthropic, Deepseek, or LM Studio (local). 
+ * @plugindesc v1.4 NPC AI via Mistral, OpenAI, Anthropic, Deepseek, or LM Studio (local). 
  * @author You
  * 
  * @param ApiKey
@@ -1441,6 +1441,7 @@
                 break;
             }
             case "speak": {
+                console.log("[AICharacter] Speaking:", action.text);
                 if (action.text) {
                     // Split long text into multiple message pages (<= 240 chars, whole words)
                     const chunks = splitTextIntoMessages(String(action.text), 240);
@@ -1450,8 +1451,10 @@
                     for (let i = 0; i < chunks.length; i++) {
                         setNpcMessageOverride(npcMessageBackground, npcMessagePosition);
                         const wrappedText = wrapTextForDialog(chunks[i]);
+                        console.log("[AICharacter] Wrapped text:", wrappedText);
                         $gameMessage.setSpeakerName(name);
                         $gameMessage.add(wrappedText);
+                        console.log("[AICharacter] Added to message:", wrappedText);
                     }
                     addToGlobalHistory(name + " says \"" + shortenForHistory(action.text) + "\"");
                     // Optional: offer a quick reply button on the last page

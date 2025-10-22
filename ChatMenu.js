@@ -1,6 +1,6 @@
 /*:
  * @target MZ
- * @plugindesc v1.2 Adds a "Chat" menu, an NPC picker, and an optional quick chat bar on the map.
+ * @plugindesc v1.4 Adds a "Chat" menu, an NPC picker, and an optional quick chat bar on the map.
  * @author You
  * 
  * @param EnableQuickBar
@@ -338,9 +338,10 @@
                     window.AICharacter.invalidateNpcThinking({ mapId: $gameMap.mapId(), eventId: npc.id });
                 }
             } catch (_) { }
-            // Optionally show it in-game immediately
-            //$gameMessage.setSpeakerName("You");
-            //$gameMessage.add(text.trim());
+            // Quick fix: clear any queued/stale NPC messages and close all menus
+            try { if ($gameMessage && $gameMessage.clear) { $gameMessage.clear(); } } catch (_) { }
+            SceneManager.goto(Scene_Map);
+            return;
         }
         this.popScene();
     };

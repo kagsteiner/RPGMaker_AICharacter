@@ -8,8 +8,6 @@ This plugin allows you to connect an LLM from Mistral, from Deepseek, from Anthr
 
 Try it out and decide for yourself.
 
-Be aware of the #1 issue: for every NPC that works towards a goal, please use a different game variable to track goal progress.
-
 ## Cost Warning
 Please note that if you ship a game with my plugin, *remove the API key from the plugin settings and tell the user they need to get their own*, or they will play at your LLM costs.
 
@@ -26,7 +24,7 @@ Use the plugin in an RPGMaker MZ event to
 - NPCs that want to go to a certain coordinate automatically do this by finding the shortest path there.
 - Decide what LLM you want to use, how dialogs should look like and how they should be positioned.
 - The commands tell the LLM the location of Player and all Events including its own.
-- The commands tell the LLM the complete interaction history.
+- The commands tell the LLM the complete interaction history, which the game author can enrich.
 - Supports the languages the LLM supports.
 
 ## Commands
@@ -71,6 +69,10 @@ You specify a goal and the LLM tries to reach it.
 - Switch Policy: describe which game switches the LLM should have available to manipulate, what they do, mwybe why it wants to use them to reach the goal.
 - Allowed Switch Ids: Comma-separated list of switches the LLM can switch. Note that I have never tried this out, but it might have potential.
 If the player performs a chat or give action towards this NPC while this command is running, it will be interrupted, no dialog or action is produced, the result variable remains unchanged. The user cannot detect this interruption, but in the normal loop this isn't required.
+
+### Add To History
+A text that you pass as parameter will be added to the history that the LLM uses to decide the NPC's action. Use $NPC to mention the name of your NPC; the command will replace it by the name of the current event.
+I needed this in a situation where an NPC has thrown the Player out of the dungeon due to misbehavior. The next time the Player came back he would immediately be thrown out again. Adding a line like "$NPC has thrown the player out of the dungeon. Once he reappears, $NPC will benevolently reconsider letting him stay". Maybe you have a similar situation.
 
 ## Usage
 Put the two plugins AICharacter and ChatMenu into the js/plugins folder of your game. Then go to the plugin manager to define the following plugin parameters:
@@ -136,7 +138,10 @@ My most successful experiments go like this:
    2. create an if-then-else statement that does things depending on the outcome - using the variable you decided for in step 1. I typically create a second tab with condition "switch x is set", and set the switch when "Decide Toward Goal" returns 1 or -1. Also break the loop in these cases.
    3. Add a short wait statement, e.g. 500 msec to 2 sec. Without this wait, the parallel event will eat all time and the UI will hang.
 
-## known issues
+## Variable Initialization issue in 
+Depending on how you use the "parallel" mode of your NPC event, the variable of "Decide Toward Goal" that holds the goal progress may be wrongly initialized. This can easily be solved by a first command to set this variable to 0. ALso I recommend to use different variables for different NPCs.
+
+## Other known issues
 - If a variable is non-zero when calling "Decide Towards Goal" the command can fail.
 - Sometimes the LLM is annoyingly chatty, and you get a new dialog every few seconds. Sometimes the LLM is not chatty at all. Prompts are tricky.
 - Player actions that are not chatting with the LLM are not added to the knowledge of the LLM yet.

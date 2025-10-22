@@ -202,6 +202,15 @@
  * @min 0
  * @default 0
  * 
+ * @command AddToHistory
+ * @text Add To History
+ * @desc Adds a line to global history. Replaces $NPC with this event's name.
+ * @arg text
+ * @text Text
+ * @type note
+ * @desc The line to add to history. $NPC will be replaced by the event's name.
+ * @default 
+ * 
  * @help AICharacter.js
  * This plugin lets an NPC (event) decide its next action using Mistral, OpenAI, Anthropic, Deepseek, or LM Studio (local).
  * 
@@ -285,6 +294,47 @@
     }
     const npcMessageBackground = parseBackgroundParam(npcMessageBackgroundParam);
     const npcMessagePosition = parsePositionParam(npcMessagePositionParam);
+
+    // --- Lightweight logging ---
+    // Configure which topics should be emitted to the console.
+    const logTopics = new Set([
+        "lifecycle",     // begin/end of commands, general flow
+        "busy",          // skip messages due to busy/thinking
+        "goal",          // goal updates
+        //"llm_prompt",    // full prompts sent to LLM
+        //"llm_parse",     // parsed/normalized LLM outputs
+        "map",           // map transitions
+        "variable",      // RPG Maker variable assignments
+        "error"          // error reporting
+    ]);
+
+    function log(topic, loglevel, message) {
+        try {
+            const t = String(topic || "");
+            if (!t || !logTopics.has(t)) return;
+            const level = String(loglevel || "info").toLowerCase();
+            if (level === "warn" && console.warn) { console.warn(message); return; }
+            if (level === "error" && console.error) { console.error(message); return; }
+            console.log(message);
+        } catch (_) { }
+    }
+
+    // Log all RPG Maker variable assignments
+    const _AICharacter_Game_Variables_setValue = Game_Variables.prototype.setValue;
+    Game_Variables.prototype.setValue = function (variableId, value) {
+        try {
+            let previousValue;
+            try { previousValue = this.value(variableId); } catch (_) { previousValue = undefined; }
+            let prevStr, nextStr;
+            try { prevStr = JSON.stringify(previousValue); } catch (_) { prevStr = String(previousValue); }
+            try { nextStr = JSON.stringify(value); } catch (_) { nextStr = String(value); }
+            log("variable", "info", `[AICharacter] Variable ${variableId}: ${prevStr} -> ${nextStr}`);
+            if (prevStr === "\"1\"" && nextStr === "\"0\"") {
+                console.log("DASISSER");
+            }
+        } catch (_) { }
+        return _AICharacter_Game_Variables_setValue.call(this, variableId, value);
+    };
 
     // Apply NPC message overrides just-in-time when a message actually starts
     const _AICharacter_Window_Message_startMessage = Window_Message.prototype.startMessage;
@@ -570,7 +620,7 @@
 
     PluginManager.registerCommand(pluginName, "SetNPCDescription", function (args) {
         const startTime = new Date();
-        console.log(`[AICharacter] BEGIN SetNPCDescription - ${startTime.toISOString()}`);
+        log("lifecycle", "info", `[AICharacter] BEGIN SetNPCDescription - ${startTime.toISOString()}`);
 
         let description = args.description || "";
         // Clean up line breaks: \n\n becomes \n, single \n becomes space
@@ -588,12 +638,12 @@
         // console.log("[AICharacter] SetNPCDescription for event", eventId, "on map", mapId, ":", description.slice(0, 100));
 
         const endTime = new Date();
-        console.log(`[AICharacter] END SetNPCDescription - ${endTime.toISOString()}`);
+        log("lifecycle", "info", `[AICharacter] END SetNPCDescription - ${endTime.toISOString()}`);
     });
 
     PluginManager.registerCommand(pluginName, "DecideAndAct", function () {
         const startTime = new Date();
-        console.log(`[AICharacter] BEGIN DecideAndAct - ${startTime.toISOString()}`);
+        log("lifecycle", "info", `[AICharacter] BEGIN DecideAndAct - ${startTime.toISOString()}`);
 
         const mapId = $gameMap.mapId();
         const eventId = this.eventId ? this.eventId() : 0;
@@ -604,7 +654,7 @@
         // Prevent overlapping LLM calls for the same NPC
         if (state.isThinking) {
             const endTimeBusy = new Date();
-            console.log(`[AICharacter] SKIP DecideAndAct (busy) - ${endTimeBusy.toISOString()}`);
+            log("busy", "info", `[AICharacter] SKIP DecideAndAct (busy) - ${endTimeBusy.toISOString()}`);
             return;
         }
         const requestGen = state.thinkGen || 0;
@@ -635,7 +685,7 @@
                 }
             }
             const endTime = new Date();
-            console.log(`[AICharacter] END DecideAndAct - ${endTime.toISOString()}`);
+            log("lifecycle", "info", `[AICharacter] END DecideAndAct - ${endTime.toISOString()}`);
         }).catch(e => {
             // console.error("[AICharacter] LLM error for event", eventId, ":", e);
             if (state.activeRequestGen === requestGen) {
@@ -644,13 +694,13 @@
                 state.abortController = null;
             }
             const endTime = new Date();
-            console.log(`[AICharacter] END DecideAndAct (error) - ${endTime.toISOString()}`);
+            log("lifecycle", "info", `[AICharacter] END DecideAndAct (error) - ${endTime.toISOString()}`);
         });
     });
 
     PluginManager.registerCommand(pluginName, "SetNPCItemQuantity", function (args) {
         const startTime = new Date();
-        console.log(`[AICharacter] BEGIN SetNPCItemQuantity - ${startTime.toISOString()}`);
+        log("lifecycle", "info", `[AICharacter] BEGIN SetNPCItemQuantity - ${startTime.toISOString()}`);
         const mapId = $gameMap.mapId();
         const eventId = this.eventId ? this.eventId() : 0;
         if (eventId <= 0) return;
@@ -661,12 +711,12 @@
         const name = ($dataItems && $dataItems[itemId]) ? ($dataItems[itemId].name || ("Item " + itemId)) : ("Item " + itemId);
         setNpcInventoryQuantity(mapId, eventId, itemId, name, qty);
         const endTime = new Date();
-        console.log(`[AICharacter] END SetNPCItemQuantity - ${endTime.toISOString()}`);
+        log("lifecycle", "info", `[AICharacter] END SetNPCItemQuantity - ${endTime.toISOString()}`);
     });
 
     PluginManager.registerCommand(pluginName, "DecideTowardGoal", function (args) {
         const startTime = new Date();
-        console.log(`[AICharacter] BEGIN DecideTowardGoal - ${startTime.toISOString()}`);
+        log("lifecycle", "info", `[AICharacter] BEGIN DecideTowardGoal - ${startTime.toISOString()}`);
 
         const mapId = $gameMap.mapId();
         const eventId = this.eventId ? this.eventId() : 0;
@@ -676,7 +726,7 @@
         if (!npc) return;
         if (state.isThinking) {
             const endTimeBusy = new Date();
-            console.log(`[AICharacter] SKIP DecideTowardGoal (busy) - ${endTimeBusy.toISOString()}`);
+            log("busy", "info", `[AICharacter] SKIP DecideTowardGoal (busy) - ${endTimeBusy.toISOString()}`);
             return;
         }
         const requestGen = state.thinkGen || 0;
@@ -705,8 +755,11 @@
         const trimmedGoal = String(goal).trim();
         if (state.currentGoal !== trimmedGoal) {
             const name = npc.event().name || "NPC";
-            console.log(`[AICharacter] Event ${eventId} (${name}) new goal: ${trimmedGoal}`);
+            log("goal", "info", `[AICharacter] Event ${eventId} (${name}) new goal: ${trimmedGoal}`);
             state.currentGoal = trimmedGoal;
+        }
+        else {
+            log("goal", "info", `[AICharacter] Event ${eventId} (${name}) goal unchanged: ${trimmedGoal}`);
         }
 
         const env = buildEnvironmentSnapshot(mapId, eventId, npc, state);
@@ -748,7 +801,7 @@
                 }
             }
             const endTime = new Date();
-            console.log(`[AICharacter] END DecideTowardGoal - ${endTime.toISOString()}`);
+            log("lifecycle", "info", `[AICharacter] END DecideTowardGoal - ${endTime.toISOString()}`);
         }).catch(e => {
             if (state.activeRequestGen === requestGen) {
                 state.isThinking = false;
@@ -756,7 +809,7 @@
                 state.abortController = null;
             }
             const endTime = new Date();
-            console.log(`[AICharacter] END DecideTowardGoal (error) - ${endTime.toISOString()}`);
+            log("lifecycle", "info", `[AICharacter] END DecideTowardGoal (error) - ${endTime.toISOString()}`);
         });
     });
 
@@ -820,6 +873,23 @@
         setNpcCoins(mapId, eventId, amt);
     });
 
+    PluginManager.registerCommand(pluginName, "AddToHistory", function (args) {
+        const startTime = new Date();
+        log("lifecycle", "info", `[AICharacter] BEGIN AddToHistory - ${startTime.toISOString()}`);
+        const mapId = $gameMap.mapId();
+        const eventId = this.eventId ? this.eventId() : 0;
+        if (eventId <= 0) return;
+        const npc = $gameMap.event(eventId);
+        const npcName = npc && npc.event ? (npc.event().name || "NPC") : "NPC";
+        let text = String(args && args.text != null ? args.text : "");
+        if (!text) return;
+        // Replace all occurrences of $NPC with the event's name
+        text = text.replace(/\$NPC/g, npcName);
+        addToGlobalHistory(text, mapId);
+        const endTime = new Date();
+        log("lifecycle", "info", `[AICharacter] END AddToHistory - ${endTime.toISOString()}`);
+    });
+
     async function callLlmForAction(env, npcDescription, signal) {
         const systemPrompt = "You control an NPC in a RPG Maker MZ game. The whole game is in " + language + "; respond in " + language + ". In the environment below your NPC is called 'npc'. Return EXACTLY ONE minified JSON object and nothing else (no backticks, no markdown, no explanations). Schema: an object with key \"type\" in [\"move\",\"speak\",\"give\",\"wait\",\"giveCoins\"]. For move, DO NOT choose a direction; include integer \"targetX\" and \"targetY\" (tile coordinates) of where you would want to be only — the engine pathfinds and takes the first step. For speak include \"text\" and ensure you stay in character. For give include numeric \"itemId\" and optional \"text\". For giveCoins include integer \"coins\" (>0) not exceeding npc.equipment \"$coins$\" qty. For wait include \"ms\" (200-1000).\n\nEXAMPLE OUTPUTS (do not copy values):\n{\"type\":\"move\",\"targetX\":12,\"targetY\":7}\n{\"type\":\"speak\",\"text\":\"Hallo, Reisender!\"}\n{\"type\":\"give\",\"itemId\":1,\"text\":\"Nimm dies.\"}\n{\"type\":\"giveCoins\",\"coins\":5}\n{\"type\":\"wait\",\"ms\":500}\n\nPROXIMITY POLICY:\n- Environment provides player.distance (Manhattan) and player.isAdjacent.\n- If player.isAdjacent is true, prefer speak/give/giveCoins/wait over move.\n- Apply the same consideration for 'others' that are adjacent.";
         const recentHistory = getGlobalHistory(env && env.map ? env.map.id : undefined);
@@ -827,7 +897,7 @@
         const historyBlock = recentHistory.length ? historyHeader + recentHistory.join("\n") + "\n\n" : "";
         const descBlock = npcDescription ? ("NPC Description:\n" + String(npcDescription).trim() + "\n\n") : "";
         const userPrompt = historyBlock + descBlock + "Environment:\n" + JSON.stringify(env, null, 2) + "\nChoose the next action.";
-        console.log("[AICharacter] callLlmForAction FULL PROMPT:\n=== SYSTEM ===\n" + systemPrompt + "\n=== USER ===\n" + userPrompt + "\n=== END PROMPT ===");
+        log("llm_prompt", "debug", "[AICharacter] callLlmForAction FULL PROMPT:\n=== SYSTEM ===\n" + systemPrompt + "\n=== USER ===\n" + userPrompt + "\n=== END PROMPT ===");
         const usingMistral = provider === "mistral";
         const usingLmStudio = provider === "lmstudio";
         const usingAnthropic = provider === "anthropic";
@@ -914,7 +984,7 @@
             // console.log("[AICharacter] Sanitized action:", JSON.stringify(sanitized));
             return sanitized;
         } catch (err) {
-            // console.error("[AICharacter] Failed to parse LLM action JSON:", content, err);
+            // log("error", "error", "[AICharacter] Failed to parse LLM action JSON: " + String(content) + " :: " + (err && err.message ? err.message : String(err)));
             return null;
         }
     }
@@ -928,7 +998,7 @@
         const descBlock = npcDescription ? ("NPC Description:\n" + String(npcDescription).trim() + "\n\n") : "";
         const policyBlock = String(switchPolicy || "").trim() ? ("Switch Policy (allowed and when to use):\n" + String(switchPolicy).trim() + "\n\n") : "";
         const userPrompt = historyBlock + descBlock + goalBlock + policyBlock + "Environment:\n" + JSON.stringify(env, null, 2) + "\nReturn only JSON with {action,goal}.";
-        console.log("[AICharacter] callLlmForGoal FULL PROMPT:\n=== SYSTEM ===\n" + systemPrompt + "\n=== USER ===\n" + userPrompt + "\n=== END PROMPT ===");
+        log("llm_prompt", "debug", "[AICharacter] callLlmForGoal FULL PROMPT:\n=== SYSTEM ===\n" + systemPrompt + "\n=== USER ===\n" + userPrompt + "\n=== END PROMPT ===");
 
         const usingMistral = provider === "mistral";
         const usingLmStudio = provider === "lmstudio";
@@ -1002,14 +1072,14 @@
         }
         try {
             const obj = JSON.parse(cleanLlmTextToJsonString(content));
-            console.log("[AICharacter] callLlmForGoal parsed response:", JSON.stringify(obj, null, 2));
+            log("llm_parse", "debug", "[AICharacter] callLlmForGoal parsed response: " + JSON.stringify(obj, null, 2));
             const rawAction = obj.action || obj.Action || null;
             const rawGoal = obj.goal || obj.Goal || {};
             let action = rawAction ? sanitizeAction(rawAction) : { type: "wait", ms: 200 };
             const status = sanitizeGoalStatus(rawGoal.status);
             return { action, status };
         } catch (err) {
-            console.error("[AICharacter] callLlmForGoal failed to parse JSON:", content, err);
+            log("error", "error", "[AICharacter] callLlmForGoal failed to parse JSON: " + String(content) + " :: " + (err && err.message ? err.message : String(err)));
             return null;
         }
     }
@@ -1429,7 +1499,8 @@
                         adjustNpcInventory($gameMap.mapId(), npc.eventId(), action.itemId, item.name, -1);
                     } catch (_) { }
                     if (action.text) {
-                        $gameMessage.add(name + ": " + action.text);
+                        const wrappedText = wrapTextForDialog(name + ": " + action.text);
+                        $gameMessage.add(wrappedText);
                     } else {
                         $gameMessage.add(name + " gave you " + item.name + ".");
                     }
@@ -1452,7 +1523,9 @@
                     $gameParty.gainGold(amount);
                     addToGlobalHistory(name + " gives player " + amount + " gold");
                     if (action.text) {
-                        $gameMessage.add(name + ": " + action.text);
+                        const wrappedText = wrapTextForDialog(name + ": " + action.text);
+                        setNpcMessageOverride(npcMessageBackground, npcMessagePosition);
+                        $gameMessage.add(wrappedText);
                     }
                 } else {
                     const frames = Math.floor((action.ms || 200) / 16);
@@ -1539,7 +1612,7 @@
         _Game_Map_setup.call(this, mapId);
         // If changing to a different map, invalidate all active thinking on the old map
         if (oldMapId > 0 && oldMapId !== mapId) {
-            console.log(`[AICharacter] Map transition: ${oldMapId} -> ${mapId}. Aborting all thinking on map ${oldMapId}.`);
+            log("map", "info", `[AICharacter] Map transition: ${oldMapId} -> ${mapId}. Aborting all thinking on map ${oldMapId}.`);
             invalidateAllThinkingOnMap(oldMapId, "map_transition");
         }
     };

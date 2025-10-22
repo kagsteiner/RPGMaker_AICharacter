@@ -150,8 +150,9 @@ Depending on how you use the "parallel" mode of your NPC event, the variable of 
 ## Version history
 V1.0-1.2: basic plugin
 V1.3: fixes and improvements when changing levels
-  
-  
+V1.4: 
+- new command "Add to history" to make the LLM aware of game changes that it doesn't see  
+- better handling of giving items and chatting from menu: done chatting or giving items brings you back to the game. If the NPC has finished thinking in the background (based on old data) and wants to show a chat, this message is cleared and the LLM will start thinking again based on the new chat or item handover.  
 
 
 

@@ -131,14 +131,15 @@ Has no parameter.
 ## Example Event
 My most successful experiments go like this:
 1. create a new event, select parallel as trigger.
-2. First event command is "Set NPC Description". Write a really nice description. The livelier the description, with background of the character in the story, description of how (s)he looks etc, the more the LLM has to chat about and act natural.
-3. Add a loop.
-4. Within the loop, do this:
+3. First event command is "Set NPC Description". Write a really nice description. The livelier the description, with background of the character in the story, description of how (s)he looks etc, the more the LLM has to chat about and act natural.
+4. Add a loop.
+5. Within the loop, do this:
    1. call "Decide Toward Goal". Select an unused variable to store the result of the command. Write a really crisp description of the goal to reach, and success/failure criteria the LLM will understand.
-   2. create an if-then-else statement that does things depending on the outcome - using the variable you decided for in step 1. I typically create a second tab with condition "switch x is set", and set the switch when "Decide Toward Goal" returns 1 or -1. Also break the loop in these cases.
+   2. create an if-then-else statement that does things depending on the outcome - using the variable you decided for in step 1. I typically create a second tab with condition "switch x is set", and set the switch when "Decide Toward Goal" returns 1 or -1. Also break the loop in these cases. Then go back to the first line of the event, and set the variable you use to 0 there. (sorry, ugly bug that won't go away, see below)
    3. Add a short wait statement, e.g. 500 msec to 2 sec. Without this wait, the parallel event will eat all time and the UI will hang.
+6. At any time if the event performs RPGMaker actions that the LLMs should know about, use the "Add to history" command to make them known.
 
-## Variable Initialization issue in 
+## Variable Initialization issue in Decide Toward Goal
 Depending on how you use the "parallel" mode of your NPC event, the variable of "Decide Toward Goal" that holds the goal progress may be wrongly initialized. This can easily be solved by a first command to set this variable to 0. ALso I recommend to use different variables for different NPCs.
 
 ## Other known issues

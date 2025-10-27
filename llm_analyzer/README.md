@@ -28,7 +28,7 @@ You may want to delete this file after import.
 
 After the tool has read the file, you see a table with performance information about each LLM you have been using so far: LLM name, number of calls to the LLM, min, avg, max time spent in msec, and p90, ie. how long the 90% case took.
 
-https://github.com/kagsteiner/RPGMaker_AICharacter/blob/acdd6c49b9794f23b18b8f0013d0bb1e7f5782aa/llm_analyzer/tab1.png
+![Screenshot Performance Stats](https://github.com/kagsteiner/RPGMaker_AICharacter/blob/acdd6c49b9794f23b18b8f0013d0bb1e7f5782aa/llm_analyzer/tab1.png) Screenshot
 
 This inforamtion can help you choose an LLM that performs best for your game.
 

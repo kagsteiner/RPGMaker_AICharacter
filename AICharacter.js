@@ -88,6 +88,12 @@
  * @desc Label for the in-dialog reply choice.
  * @default Antworten…
  * 
+ * @param EnableAnalyzerLogging
+ * @text Enable Analyzer Logging
+ * @type boolean
+ * @desc If true, writes logs/llm/performance.csv and session_*.json for analysis.
+ * @default false
+ * 
  * @param NpcMessageBackground
  * @text NPC Message Background
  * @type select
@@ -151,6 +157,14 @@
  * @type string
  * @desc Comma-separated switch IDs the NPC may toggle (e.g., "3,5,8"). Empty = no enforcement.
  * @default 
+ * 
+ * @command SetAnalyzerLogging
+ * @text Set Analyzer Logging
+ * @desc Enable/disable writing analyzer logs at runtime.
+ * @arg enabled
+ * @text Enabled
+ * @type boolean
+ * @default false
  * 
  * @command SetNPCItemQuantity
  * @text Set NPC Item Quantity
@@ -274,6 +288,8 @@
     const temperature = Number(params["Temperature"] || 0.2);
     const maxTokens = Number(params["MaxTokens"] || 200);
     const language = String(params["Language"] || "German").trim();
+    const enableAnalyzerLoggingParam = String(params["EnableAnalyzerLogging"] || "false").toLowerCase();
+    let analyzerLoggingEnabled = (enableAnalyzerLoggingParam === "true");
     // Optional UX parameters
     const enableReplyChoice = String(params["EnableReplyChoice"] || "true").toLowerCase() === "true";
     const replyChoiceLabel = String(params["ReplyChoiceLabel"] || "Antworten…");
@@ -318,6 +334,139 @@
             console.log(message);
         } catch (_) { }
     }
+
+    // --- LLM Analyzer file logging (performance CSV + session JSON) ---
+    const LLM_ANALYZER = (() => {
+        let fs = null, path = null;
+        try {
+            if (typeof window !== "undefined" && window.require) {
+                fs = window.require("fs");
+                path = window.require("path");
+            } else if (typeof require === "function") {
+                fs = require("fs");
+                path = require("path");
+            }
+        } catch (_) { /* no node filesystem */ }
+
+        const state = {
+            baseDir: null,
+            perfCsv: null,
+            perfHeaderWritten: false,
+            session: null // { guid, llmName, startedAtIso, startedAtMs, filePath, interactions: [] }
+        };
+
+        function ensureBaseDir() {
+            if (!fs || !path) return null;
+            if (state.baseDir && safeExists(state.baseDir)) return state.baseDir;
+            const dir = path.join(process.cwd ? process.cwd() : ".", "logs", "llm");
+            try { safeMkdirp(dir); } catch (_) { }
+            state.baseDir = dir;
+            return dir;
+        }
+
+        function safeExists(p) {
+            try { return fs.existsSync(p); } catch (_) { return false; }
+        }
+        function safeMkdirp(dir) {
+            try { fs.mkdirSync(dir, { recursive: true }); } catch (_) { }
+        }
+        function safeAppend(file, text) {
+            try { fs.appendFileSync(file, text, { encoding: "utf-8" }); } catch (_) { }
+        }
+        function safeWrite(file, text) {
+            try { fs.writeFileSync(file, text, { encoding: "utf-8" }); } catch (_) { }
+        }
+
+        function guid() {
+            // lightweight GUID
+            const s4 = () => Math.floor((1 + Math.random()) * 0x10000).toString(16).slice(1);
+            return s4() + s4() + "-" + s4() + "-" + s4() + "-" + s4() + "-" + s4() + s4() + s4();
+        }
+
+        function ensurePerfCsv() {
+            const dir = ensureBaseDir();
+            if (!dir) return null;
+            if (!state.perfCsv) state.perfCsv = path.join(dir, "performance.csv");
+            if (!safeExists(state.perfCsv)) {
+                safeWrite(state.perfCsv, "llm_name,duration_ms,call_timestamp\n");
+                state.perfHeaderWritten = true;
+            }
+            return state.perfCsv;
+        }
+
+        function appendPerfRow(llmName, durationMs, whenIso) {
+            try {
+                if (!analyzerLoggingEnabled) return;
+                const file = ensurePerfCsv();
+                if (!file) return;
+                const name = String(llmName || "").trim();
+                const ms = Math.max(1, Math.floor(Number(durationMs || 0)));
+                const ts = whenIso || new Date().toISOString();
+                const row = `${name},${ms},${ts}\n`;
+                safeAppend(file, row);
+            } catch (_) { }
+        }
+
+        function startSessionIfNeeded(llmName) {
+            const dir = ensureBaseDir();
+            if (!dir) return;
+            const normalized = String(llmName || "").trim().toLowerCase();
+            const now = new Date();
+            if (!state.session || state.session.llmName !== normalized) {
+                state.session = {
+                    guid: guid(),
+                    llmName: normalized,
+                    startedAtIso: now.toISOString(),
+                    startedAtMs: now.getTime(),
+                    filePath: null,
+                    interactions: []
+                };
+                state.session.filePath = path.join(dir, `session_${state.session.guid}.json`);
+                // write initial skeleton
+                persistSession();
+            }
+        }
+
+        function persistSession() {
+            if (!state.session || !fs) return;
+            const payload = {
+                llm_name: state.session.llmName,
+                session_guid: state.session.guid,
+                started_at: state.session.startedAtIso,
+                interactions: state.session.interactions
+            };
+            try { safeWrite(state.session.filePath, JSON.stringify(payload, null, 2)); } catch (_) { }
+        }
+
+        function recordInteraction(llmName, situationId, prompt, response) {
+            try {
+                if (!analyzerLoggingEnabled) return;
+                startSessionIfNeeded(llmName);
+                if (!state.session) return;
+                const nowMs = Date.now();
+                const t = Math.max(0, nowMs - (state.session.startedAtMs || nowMs));
+                state.session.interactions.push({
+                    t_ms: t,
+                    situation_id: String(situationId || "").trim() || "unknown",
+                    prompt: String(prompt == null ? "" : prompt),
+                    response: String(response == null ? "" : response)
+                });
+                // rewrite file on each interaction for simplicity
+                persistSession();
+            } catch (_) { }
+        }
+
+        return { appendPerfRow, recordInteraction };
+    })();
+
+    // Runtime plugin command to enable/disable analyzer logging
+    PluginManager.registerCommand(pluginName, "SetAnalyzerLogging", function (args) {
+        try {
+            const flag = String(args && args.enabled != null ? args.enabled : "false").toLowerCase();
+            analyzerLoggingEnabled = (flag === "true");
+            log("lifecycle", "info", `[AICharacter] Analyzer logging: ${analyzerLoggingEnabled ? "ENABLED" : "DISABLED"}`);
+        } catch (_) { }
+    });
 
     // Log all RPG Maker variable assignments
     const _AICharacter_Game_Variables_setValue = Game_Variables.prototype.setValue;
@@ -953,10 +1102,12 @@
         }
         // console.log("[AICharacter] Calling LLM API at", url, "with model", model);
         // console.log("[AICharacter] Request body:", JSON.stringify(body, null, 2));
+        const perfStart = Date.now();
         const resText = await httpPostJson(url, headers, body, signal);
         // console.log("[AICharacter] Raw response:", resText);
         if (!resText) {
             // console.warn("[AICharacter] Empty response from API");
+            try { LLM_ANALYZER.appendPerfRow(model, (Date.now() - perfStart), new Date().toISOString()); } catch (_) { }
             return null;
         }
         let content = null;
@@ -977,6 +1128,10 @@
         } catch (_) {
             content = resText;
         }
+        try {
+            LLM_ANALYZER.appendPerfRow(model, (Date.now() - perfStart), new Date().toISOString());
+            LLM_ANALYZER.recordInteraction(model, (env && env.npc && env.npc.name) ? env.npc.name : "unknown_npc", userPrompt, content);
+        } catch (_) { }
         try {
             const action = JSON.parse(cleanLlmTextToJsonString(content));
             // console.log("[AICharacter] Parsed action JSON:", JSON.stringify(action));
@@ -1051,6 +1206,7 @@
                 headers["Authorization"] = "Bearer " + apiKey;
             }
         }
+        const perfStart = Date.now();
         const resText = await httpPostJson(url, headers, body, signal);
         if (!resText) return null;
         let content = null;
@@ -1070,6 +1226,10 @@
         } catch (_) {
             content = resText;
         }
+        try {
+            LLM_ANALYZER.appendPerfRow(model, (Date.now() - perfStart), new Date().toISOString());
+            LLM_ANALYZER.recordInteraction(model, (env && env.npc && env.npc.name) ? env.npc.name : "unknown_npc", userPrompt, content);
+        } catch (_) { }
         try {
             const obj = JSON.parse(cleanLlmTextToJsonString(content));
             log("llm_parse", "debug", "[AICharacter] callLlmForGoal parsed response: " + JSON.stringify(obj, null, 2));

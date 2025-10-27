@@ -26,6 +26,7 @@ Use the plugin in an RPGMaker MZ event to
 - The commands tell the LLM the location of Player and all Events including its own.
 - The commands tell the LLM the complete interaction history, which the game author can enrich.
 - Supports the languages the LLM supports.
+- Includes a toool to analyze where and why your LLM characters misbehave.
 
 ## Commands
 ChatMenu has no command, it will create a "Chat" menu or a "Chat" button.
@@ -96,6 +97,7 @@ Put the two plugins AICharacter and ChatMenu into the js/plugins folder of your 
 - Reply Choice label: The text of the button to reply.
 - NPC Message background: inherit, window, dim, transparant - like the setting for normal dialogs.
 - NPC Message position: inherit, top, middle, bottom - like the setting for normal dialogs.
+- Enable analyzer logging: write log files while playing that the llm_analyzer reads. See below.
 
 What to do - Mistral:
 1. get yourself a Mistral API Key from mistral.ai. Note: by default you get a free tier which will only allow 1 request per second. If your level has 1 NPC it has to wait 60 frames after each command invocation!
@@ -138,6 +140,9 @@ My most successful experiments go like this:
    2. create an if-then-else statement that does things depending on the outcome - using the variable you decided for in step 1. I typically create a second tab with condition "switch x is set", and set the switch when "Decide Toward Goal" returns 1 or -1. Also break the loop in these cases. Then go back to the first line of the event, and set the variable you use to 0 there. (sorry, ugly bug that won't go away, see below)
    3. Add a short wait statement, e.g. 500 msec to 2 sec. Without this wait, the parallel event will eat all time and the UI will hang.
 6. At any time if the event performs RPGMaker actions that the LLMs should know about, use the "Add to history" command to make them known.
+
+# Analysis Tool
+Folder llm_analyzer contains an analysis tool that helps you optimize your prompts for the NPC characters. You need to set the parameter "enable analyzer logging" to enable AICharacter's logging for this tool. You find full documentation of why this tool can help you and how this tool can help you in folder llm_analyzer.
 
 ## Variable Initialization issue in Decide Toward Goal
 Depending on how you use the "parallel" mode of your NPC event, the variable of "Decide Toward Goal" that holds the goal progress may be wrongly initialized. This can easily be solved by a first command to set this variable to 0. ALso I recommend to use different variables for different NPCs.

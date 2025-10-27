@@ -36,6 +36,8 @@ This inforamtion can help you choose an LLM that performs best for your game.
 
 The heart of the app. First, again, import a log file that contains all communication with the LLM in the session you have played. If you have played several sessions, pick the one you want to analyze. Once imported, this session is saved to the app's database. You do not need to re-import it, and can delete the file if you wish.
 
+![Screenshot of Session Browser](https://github.com/kagsteiner/RPGMaker_AICharacter/blob/2c149608b682c44bbac91c047bf56fd4b0d7f88b/llm_analyzer/tab2.png) Screenshot
+
 On the left side of the screen you see all imported sessions. Select one of them to analyze and annotate it.
 
 On the right side, you see each interaction one by one. The UI has three sections of text:

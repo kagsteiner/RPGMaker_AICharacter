@@ -309,6 +309,7 @@ def fetch_review(
 	conn: sqlite3.Connection,
 	llm_name: Optional[str],
 	situation_id: Optional[str],
+	session_timestamp: Optional[str] = None,
 ) -> Tuple[int, int, List[sqlite3.Row]]:
 	conds = []
 	args: List[object] = []
@@ -318,6 +319,9 @@ def fetch_review(
 	if situation_id:
 		conds.append("interactions.situation_id = ?")
 		args.append(situation_id)
+	if session_timestamp:
+		conds.append("sessions.session_timestamp = ?")
+		args.append(session_timestamp)
 	where = f"WHERE {' AND '.join(conds)}" if conds else ""
 	rows = list(
 		conn.execute(
@@ -334,6 +338,12 @@ def fetch_review(
 	okay = sum(1 for r in rows if r["rating"] == "okay")
 	not_okay = sum(1 for r in rows if r["rating"] == "not_okay")
 	return okay, not_okay, rows
+
+
+def fetch_session_timestamps(conn: sqlite3.Connection) -> List[str]:
+	"""Get all distinct session timestamps."""
+	rows = list(conn.execute("SELECT DISTINCT session_timestamp FROM sessions WHERE session_timestamp IS NOT NULL ORDER BY session_timestamp DESC"))
+	return [r[0] for r in rows]
 
 
 def fetch_durations_grouped(

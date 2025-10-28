@@ -340,11 +340,13 @@ class ReviewTab(ttk.Frame):
 		filters.pack(fill=tk.X)
 		self.llm_var = tk.StringVar(value="")
 		self.sit_var = tk.StringVar(value="")
+		self.session_var = tk.StringVar(value="")
 		self.cmb_llm = ttk.Combobox(filters, textvariable=self.llm_var, values=self._load_llms(), width=30)
 		self.cmb_sit = ttk.Combobox(filters, textvariable=self.sit_var, values=self._load_situations(), width=30)
+		self.cmb_session = ttk.Combobox(filters, textvariable=self.session_var, values=self._load_sessions(), width=30)
 		self.btn_apply = ttk.Button(filters, text="Apply", command=self.refresh)
 		self.btn_export = ttk.Button(filters, text="Export CSV", command=self.on_export)
-		for w in (self.cmb_llm, self.cmb_sit, self.btn_apply, self.btn_export):
+		for w in (self.cmb_llm, self.cmb_sit, self.cmb_session, self.btn_apply, self.btn_export):
 			w.pack(side=tk.LEFT, padx=6, pady=6)
 
 		self.lbl_summary = ttk.Label(self, text="")
@@ -373,12 +375,17 @@ class ReviewTab(ttk.Frame):
 		_, sits = db.fetch_llm_and_situations(self.conn)
 		return [""] + sits
 
+	def _load_sessions(self) -> List[str]:
+		sessions = db.fetch_session_timestamps(self.conn)
+		return [""] + sessions
+
 	def refresh(self):
 		for i in self.tree.get_children():
 			self.tree.delete(i)
 		llm = self.llm_var.get().strip() or None
 		sit = self.sit_var.get().strip() or None
-		ok, not_ok, rows = db.fetch_review(self.conn, llm, sit)
+		session = self.session_var.get().strip() or None
+		ok, not_ok, rows = db.fetch_review(self.conn, llm, sit, session)
 		den = ok + not_ok
 		ok_score = (ok / den) if den else None
 		self.lbl_summary.config(text=f"okay: {ok} | not_okay: {not_ok} | OK score: {ok_score:.2f}" if ok_score is not None else "okay: 0 | not_okay: 0 | OK score: —")
@@ -397,7 +404,8 @@ class ReviewTab(ttk.Frame):
 			return
 		llm = self.llm_var.get().strip() or None
 		sit = self.sit_var.get().strip() or None
-		_, _, rows = db.fetch_review(self.conn, llm, sit)
+		session = self.session_var.get().strip() or None
+		_, _, rows = db.fetch_review(self.conn, llm, sit, session)
 		with open(path, "w", encoding="utf-8", newline="") as f:
 			writer = csv.writer(f)
 			writer.writerow(["interaction_time","session_time","prompt","response","comment","rating"]) 

@@ -51,7 +51,7 @@ Once you have annotated your session you want to go to the next screen
 
 ## LLM & Situation Review
 
-The third tab helps you find out which NPCs need changes. Select an LLM and an NPC and click "Apply". You will then see a list of all LLM interactions for this NPC, along with an "OK Score", ie. what percentage of its behavior you considered okay, and a full list of the interactions with ok/not okay and annotations.
+The third tab helps you find out which NPCs need changes. Select an LLM and an NPC and a session to view and click "Apply". You will then see a list of all LLM interactions for this NPC, along with an "OK Score", ie. what percentage of its behavior you considered okay, and a full list of the interactions with ok/not okay and annotations.
 
 ![Screenshot of Review](https://github.com/kagsteiner/RPGMaker_AICharacter/blob/547a5f339aa4deb0a5f817195697e48ab00869e6/llm_analyzer/tab3.png) Screenshot
 

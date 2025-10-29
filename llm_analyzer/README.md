@@ -57,3 +57,5 @@ The third tab helps you find out which NPCs need changes. Select an LLM and an N
 
 This often shows immediately what you have to change in the NPC description or the goal description. For more sophisticated analysis you can export this table to a csv file.
 
+Double-click on any item to see a pop-up with all details.
+

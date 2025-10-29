@@ -47,6 +47,7 @@ class AnalyzerApp(tk.Tk):
 
 		nb = ttk.Notebook(self)
 		nb.pack(fill=tk.BOTH, expand=True)
+		self.nb = nb
 
 		self.perf_tab = PerformanceTab(nb, self.conn)
 		nb.add(self.perf_tab, text="Performance Overview")
@@ -58,6 +59,9 @@ class AnalyzerApp(tk.Tk):
 		nb.add(self.review_tab, text="LLM & Situation Review")
 
 		self.protocol("WM_DELETE_WINDOW", self.on_close)
+		# Refresh review tab when selected and when data updates
+		nb.bind("<<NotebookTabChanged>>", self._on_tab_changed)
+		self.bind("<<DataUpdated>>", self._on_data_updated)
 
 	def on_close(self):
 		try:
@@ -135,6 +139,27 @@ class AnalyzerApp(tk.Tk):
 			style.map("TCombobox",
 				fieldbackground=[("readonly", surface)],
 				foreground=[("readonly", fg)])
+		except Exception:
+			pass
+
+	def _on_tab_changed(self, event):
+		try:
+			selected = self.nb.select()
+			widget = self.nb.nametowidget(selected)
+			if widget is self.review_tab:
+				self.review_tab.reload_filter_values()
+				self.review_tab.refresh()
+		except Exception:
+			pass
+
+	def _on_data_updated(self, event):
+		try:
+			self.review_tab.reload_filter_values()
+			# If review tab is currently visible, also refresh its data
+			selected = self.nb.select()
+			widget = self.nb.nametowidget(selected)
+			if widget is self.review_tab:
+				self.review_tab.refresh()
 		except Exception:
 			pass
 
@@ -329,6 +354,11 @@ class SessionTab(ttk.Frame):
 			return
 		messagebox.showinfo("Import Summary", f"Inserted sessions: {res['inserted_sessions']}, interactions: {res['inserted_interactions']}")
 		self.refresh_sessions()
+		# Notify app that data changed so other tabs (e.g., Review) can refresh
+		try:
+			self.winfo_toplevel().event_generate("<<DataUpdated>>")
+		except Exception:
+			pass
 
 
 class ReviewTab(ttk.Frame):
@@ -365,7 +395,34 @@ class ReviewTab(ttk.Frame):
 			self.tree.column(col, width=w, anchor=tk.W)
 		self.tree.pack(fill=tk.BOTH, expand=True)
 
+		self.row_details: Dict[str, Dict] = {}
+		self.tree.bind("<Double-1>", self._on_tree_double_click)
+
 		self.refresh()
+
+	def reload_filter_values(self) -> None:
+		"""Reload combobox value lists from DB while preserving current selections if valid."""
+		current_llm = self.llm_var.get()
+		current_sit = self.sit_var.get()
+		current_session = self.session_var.get()
+		llms = self._load_llms()
+		sits = self._load_situations()
+		sessions = self._load_sessions()
+		self.cmb_llm.configure(values=llms)
+		self.cmb_sit.configure(values=sits)
+		self.cmb_session.configure(values=sessions)
+		if current_llm in llms:
+			self.llm_var.set(current_llm)
+		else:
+			self.llm_var.set("")
+		if current_sit in sits:
+			self.sit_var.set(current_sit)
+		else:
+			self.sit_var.set("")
+		if current_session in sessions:
+			self.session_var.set(current_session)
+		else:
+			self.session_var.set("")
 
 	def _load_llms(self) -> List[str]:
 		llms, _ = db.fetch_llm_and_situations(self.conn)
@@ -382,6 +439,7 @@ class ReviewTab(ttk.Frame):
 	def refresh(self):
 		for i in self.tree.get_children():
 			self.tree.delete(i)
+		self.row_details = {}
 		llm = self.llm_var.get().strip() or None
 		sit = self.sit_var.get().strip() or None
 		session = self.session_var.get().strip() or None
@@ -390,13 +448,24 @@ class ReviewTab(ttk.Frame):
 		ok_score = (ok / den) if den else None
 		self.lbl_summary.config(text=f"okay: {ok} | not_okay: {not_ok} | OK score: {ok_score:.2f}" if ok_score is not None else "okay: 0 | not_okay: 0 | OK score: —")
 		for r in rows:
-			itime = r["interaction_timestamp"] or f"t={r['offset_ms']} ms"
-			stime = r["session_timestamp"] or ""
-			prompt = _extract_prompt_preview(r["prompt"])[:200]
-			response = _extract_response_preview(r["response"])[:200]
-			comment = (r["comment"] or "")[:200]
-			rating = r["rating"] or ""
-			self.tree.insert("", tk.END, values=(itime, stime, prompt, response, comment, rating))
+			data = dict(r)
+			itime = data.get("interaction_timestamp") or f"t={data.get('offset_ms', 0)} ms"
+			stime = data.get("session_timestamp") or ""
+			prompt = _extract_prompt_preview(data.get("prompt"))[:200]
+			response = _extract_response_preview(data.get("response"))[:200]
+			comment = (data.get("comment") or "")[:200]
+			rating = data.get("rating") or ""
+			iid = self.tree.insert("", tk.END, values=(itime, stime, prompt, response, comment, rating))
+			self.row_details[iid] = data
+
+	def _on_tree_double_click(self, event):
+		item_id = self.tree.identify_row(event.y)
+		if not item_id:
+			return
+		data = self.row_details.get(item_id)
+		if not data:
+			return
+		ReviewDetailPopup(self, data)
 
 	def on_export(self):
 		path = filedialog.asksaveasfilename(title="Export CSV", defaultextension=".csv", filetypes=[("CSV","*.csv")])
@@ -419,3 +488,59 @@ class ReviewTab(ttk.Frame):
 					r["rating"] or "",
 				])
 			messagebox.showinfo("Export", "CSV exported.")
+
+
+class ReviewDetailPopup(tk.Toplevel):
+	BG = "#0b0c0e"
+	SURFACE = "#131419"
+	FG = "#e6e6e6"
+	SUBTLE = "#a9abb3"
+
+	def __init__(self, parent: ReviewTab, data: Dict):
+		super().__init__(parent)
+		self.title("Interaction Detail")
+		self.configure(bg=self.BG)
+		self.minsize(520, 400)
+
+		container = ttk.Frame(self)
+		container.pack(fill=tk.BOTH, expand=True, padx=16, pady=16)
+
+		itime = data.get("interaction_timestamp") or f"t={data.get('offset_ms', 0)} ms"
+		stime = data.get("session_timestamp") or "—"
+		sit = data.get("situation_id") or "—"
+		llm = data.get("llm_name") or "—"
+		rating = data.get("rating") or "—"
+
+		meta_lines = [
+			f"Interaction time: {itime}",
+			f"Session time: {stime}",
+			f"Situation: {sit}",
+			f"LLM: {llm}",
+			f"Rating: {rating}",
+		]
+		meta_label = ttk.Label(container, text="\n".join(meta_lines), justify=tk.LEFT)
+		meta_label.pack(fill=tk.X, pady=(0, 12))
+
+		self._add_text_section(container, "Prompt", data.get("prompt") or "—", height=10)
+		self._add_text_section(container, "Response", data.get("response") or "—", height=10)
+		self._add_text_section(container, "Rating Comment", data.get("comment") or "—", height=6)
+
+	def _add_text_section(self, parent, title: str, content: str, height: int = 8) -> None:
+		section = ttk.LabelFrame(parent, text=title)
+		section.pack(fill=tk.BOTH, expand=True, pady=6)
+		text = tk.Text(section, wrap=tk.WORD, height=height)
+		scrollbar = ttk.Scrollbar(section, orient=tk.VERTICAL, command=text.yview)
+		text.configure(
+			bg=self.SURFACE,
+			fg=self.FG,
+			insertbackground=self.FG,
+			highlightthickness=0,
+			bd=0,
+			selectbackground="#1f2937",
+			selectforeground=self.FG,
+		)
+		text.insert("1.0", content)
+		text.configure(state=tk.DISABLED)
+		text.configure(yscrollcommand=scrollbar.set)
+		text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=6, pady=6)
+		scrollbar.pack(side=tk.RIGHT, fill=tk.Y, pady=6)
